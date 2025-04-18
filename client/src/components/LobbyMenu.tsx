@@ -12,6 +12,7 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
   const [lobbyDetails, setLobbyDetails] = useState<LobbyData | null>(null);
   const [selectedFaction, setSelectedFaction] = useState<Faction | '' >('');
   const [isReady, setIsReady] = useState(false);
+  const [isStartingGame, setIsStartingGame] = useState(false); // Ladezustand für Start-Button
 
   useEffect(() => {
     if (!currentLobbyId) return; // Frühzeitiger Ausstieg, wenn keine Lobby-ID vorhanden ist
@@ -84,12 +85,32 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
       }
   }
 
+  const handleStartGame = () => {
+    if (!currentLobbyId || !isHost) return;
+
+    setIsStartingGame(true);
+    console.log(`Sende 'lobby:start-game' für Lobby ${currentLobbyId}`);
+    socket.emit('lobby:start-game', currentLobbyId, (response: any) => {
+      console.log('Antwort vom Server (lobby:start-game):', response);
+      if (!response?.success) {
+        alert(response?.message || 'Spiel konnte nicht gestartet werden.');
+      }
+      // Wenn erfolgreich, wird der 'game:start' Event empfangen,
+      // der dann den Wechsel zur Spielansicht auslöst (nächster Schritt).
+      setIsStartingGame(false);
+    });
+  };
+
   if (!currentLobbyId || !lobbyDetails) {
-    return <div>Lade Lobby-Details...</div>; // Ladezustand
+    return <div>Lade Lobby-Details...</div>;
   }
 
   const selfPlayer = lobbyDetails.players.find((p: LobbyPlayer) => p.id === playerId);
   const isHost = selfPlayer?.isHost || false;
+
+  // Prüfen, ob alle Spieler bereit sind
+  const allPlayersReady = lobbyDetails.players.length === lobbyDetails.maxPlayers &&
+                         lobbyDetails.players.every(p => p.isReady);
 
   return (
     <div className="lobby-menu">
@@ -126,7 +147,12 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
       {isHost && (
         <div className="lobby-host-controls">
           <h3>Host Aktionen</h3>
-          <button disabled>Spiel starten (TODO)</button> {/* TODO: Implementieren */} 
+          <button 
+            onClick={handleStartGame} 
+            disabled={!allPlayersReady || isStartingGame}
+          >
+            {isStartingGame ? 'Starte Spiel...' : 'Spiel starten'}
+          </button>
         </div>
       )}
     </div>

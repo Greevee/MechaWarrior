@@ -268,6 +268,65 @@ io.on('connection', (socket: Socket) => {
       }
   });
 
+  // --- Spiel Starten Handler (nur für Host) ---
+  socket.on('lobby:start-game', (lobbyId: string, callback: (response: any) => void) => {
+      const playerId = socket.data.playerId;
+      const lobby = activeLobbies.get(lobbyId);
+
+      // Prüfungen
+      if (!lobby) {
+          return callback({ success: false, message: 'Lobby nicht gefunden.' });
+      }
+      if (lobby.hostId !== playerId) {
+          return callback({ success: false, message: 'Nur der Host kann das Spiel starten.' });
+      }
+      if (lobby.players.size !== lobby.maxPlayers) {
+          return callback({ success: false, message: 'Nicht genügend Spieler in der Lobby.' });
+      }
+
+      // Prüfen, ob alle Spieler bereit sind
+      let allReady = true;
+      for (const player of lobby.players.values()) {
+          if (!player.isReady) {
+              allReady = false;
+              break;
+          }
+      }
+
+      if (!allReady) {
+          return callback({ success: false, message: 'Nicht alle Spieler sind bereit.' });
+      }
+
+      // --- Spiel kann starten! --- 
+      console.log(`Spiel wird in Lobby ${lobbyId} gestartet!`);
+
+      // 1. Spieldaten vorbereiten (Beispiel)
+      const gameData = {
+          lobbyId: lobby.id,
+          mode: lobby.mode,
+          players: Array.from(lobby.players.values()).map(p => ({ // Nur relevante Daten senden
+              id: p.id,
+              username: p.username,
+              faction: p.selectedFaction,
+              // Hier könnten z.B. Team-Zuweisungen für 2on2 stehen
+          }))
+      };
+
+      // 2. Event an alle Spieler in der Lobby senden
+      io.to(lobbyId).emit('game:start', gameData);
+      console.log(`'game:start' Event an Raum ${lobbyId} gesendet.`);
+
+      // 3. Lobby aus aktiven Lobbies entfernen (oder als "im Spiel" markieren)
+      activeLobbies.delete(lobbyId);
+      console.log(`Lobby ${lobbyId} aus aktiven Lobbies entfernt.`);
+
+      // 4. Globale Lobby-Liste aktualisieren
+      io.emit('lobby:list', getSerializableLobbyList());
+
+      // 5. Erfolgsrückmeldung an den Host
+      callback({ success: true });
+  });
+
   // --- Disconnect Handler ---
   socket.on('disconnect', () => {
     const username = socket.data.username;

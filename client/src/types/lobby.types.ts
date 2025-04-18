@@ -28,5 +28,16 @@ export interface LobbyData {
   createdAt: string; // Datum kommt oft als String über JSON
 }
 
-// Kein kompletter Lobby-Typ hier nötig, da wir nur LobbyData verwenden
-// (Interface LobbyData ist in LobbyBrowser.tsx definiert) 
+// Datenstruktur für ein gestartetes Spiel (vereinfacht)
+export interface GamePlayerData {
+    id: number;
+    username: string;
+    faction: Faction | null;
+}
+export interface GameData {
+    lobbyId: string;
+    mode: GameMode;
+    players: GamePlayerData[];
+}
+
+// Kein Zustand hier! 

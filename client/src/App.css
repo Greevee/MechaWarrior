@@ -18,13 +18,14 @@
 }
 
 /* Beispielstile für einen Lobby-Eintrag (auskommentiert in LobbyBrowser.tsx) */
-/*
+/* Muss aktiviert werden, wenn Liste implementiert ist */
 .lobby-item {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 10px;
   border-bottom: 1px solid #eee;
+  color: #333; /* Stelle sicher, dass der Text sichtbar ist */
 }
 
 .lobby-item:last-child {
@@ -34,7 +35,6 @@
 .lobby-item span {
   margin-right: 10px;
 }
-*/
 
 /* Stile für LobbyMenu */
 .lobby-menu {
@@ -64,6 +64,7 @@
 .lobby-players li {
   padding: 8px 0;
   border-bottom: 1px dotted #eee;
+  color: #333; /* Stelle sicher, dass der Text sichtbar ist */
 }
 
 .lobby-players li:last-child {
