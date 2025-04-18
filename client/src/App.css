@@ -1,0 +1,89 @@
+/* Bestehende Stile von Vite können hier sein oder auch nicht */
+/* ... */
+
+/* Stile für LobbyBrowser */
+.lobby-browser {
+  margin-top: 20px;
+  padding: 15px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+.lobby-actions {
+  margin-bottom: 15px;
+}
+
+.lobby-list h3 {
+  margin-bottom: 10px;
+}
+
+/* Beispielstile für einen Lobby-Eintrag (auskommentiert in LobbyBrowser.tsx) */
+/*
+.lobby-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.lobby-item:last-child {
+  border-bottom: none;
+}
+
+.lobby-item span {
+  margin-right: 10px;
+}
+*/
+
+/* Stile für LobbyMenu */
+.lobby-menu {
+  margin-top: 20px;
+  padding: 15px;
+  border: 1px solid #555;
+  border-radius: 5px;
+  background-color: #f9f9f9;
+}
+
+.lobby-menu h2 {
+  margin-top: 0;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 10px;
+  margin-bottom: 15px;
+}
+
+.lobby-menu > button { /* "Lobby verlassen" Button */
+  margin-bottom: 20px;
+}
+
+.lobby-players ul {
+  list-style: none;
+  padding: 0;
+}
+
+.lobby-players li {
+  padding: 8px 0;
+  border-bottom: 1px dotted #eee;
+}
+
+.lobby-players li:last-child {
+  border-bottom: none;
+}
+
+.lobby-controls, .lobby-host-controls {
+  margin-top: 20px;
+  padding-top: 15px;
+  border-top: 1px solid #ddd;
+}
+
+.lobby-controls div {
+    margin-bottom: 10px;
+}
+
+.lobby-controls label {
+    margin-right: 10px;
+}
+
+.lobby-controls button, .lobby-host-controls button {
+    margin-top: 10px;
+}
