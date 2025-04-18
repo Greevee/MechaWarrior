@@ -33,6 +33,7 @@ export interface GamePlayerData {
     id: number;
     username: string;
     faction: Faction | null;
+    icon?: string; // Fügen wir hier optional hinzu, falls Fraktions-Icons angezeigt werden
 }
 export interface GameData {
     lobbyId: string;

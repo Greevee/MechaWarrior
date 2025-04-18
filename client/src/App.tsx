@@ -1,101 +1,96 @@
 import React, { useState, useEffect } from 'react';
 import { socket, connectSocket } from './socket';
 import { usePlayerStore } from './store/playerStore';
-import { Socket } from 'socket.io-client'; // Importiere Socket für Typen
-import { GameData } from './types/lobby.types'; // Importiere GameData
-import LobbyBrowser from './components/LobbyBrowser'; // Importiere die neue Komponente
-import LobbyMenu from './components/LobbyMenu'; // Importiere LobbyMenu
-import './App.css'; // Erstellen wir gleich noch
+import { useGameStore } from './store/gameStore';
+import { GameState as ClientGameState } from './types/game.types';
+import { Socket } from 'socket.io-client';
+import LobbyBrowser from './components/LobbyBrowser';
+import LobbyMenu from './components/LobbyMenu';
+import GameScreen from './components/GameScreen';
+import './App.css';
 
 function App() {
   const {
     isConnected,
     username,
     playerId,
-    currentLobbyId, // Hole die aktuelle Lobby-ID aus dem Store
-    currentGameData, // Hole Spieldaten aus dem Store
+    currentLobbyId,
     setConnected,
     setUsername: setStoreUsername,
     setPlayerId,
-    setCurrentLobbyId, // Hole Aktion
-    setCurrentGameData, // Hole Aktion
+    setCurrentLobbyId,
     resetState,
   } = usePlayerStore();
+  const { gameState, setGameState } = useGameStore();
 
   const [inputUsername, setInputUsername] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Effekt zum Aufbau der Socket-Verbindung und zum Abhören von Events
   useEffect(() => {
-    // Funktion zum Verbinden und Setzen des Status im Store
-    const handleConnect = () => {
-      console.log('App: Socket verbunden');
-      setConnected(true);
-    };
-
-    // Funktion zum Trennen und Zurücksetzen des Status/Spielerdaten
+    const handleConnect = () => setConnected(true);
     const handleDisconnect = (reason: Socket.DisconnectReason) => {
       console.log('App: Socket getrennt', reason);
-      resetState(); // Setzt username, playerId und isConnected zurück
+      resetState();
     };
 
-    // Listener für Spielstart
-    const handleGameStart = (gameData: GameData) => {
-        console.log('Spielstart-Event empfangen:', gameData);
-        setCurrentGameData(gameData);
-        setCurrentLobbyId(null); // Verlasse die Lobby-Ansicht
+    const handleGameStart = (initialGameState: ClientGameState) => {
+        console.log('Spielstart-Event empfangen:', initialGameState);
+        setGameState(initialGameState);
+        setCurrentLobbyId(null);
     };
 
-    // Event-Listener hinzufügen
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
-    socket.on('game:start', handleGameStart); // Registriere neuen Listener
+    socket.on('game:start', handleGameStart);
 
-    // Versuche zu verbinden, wenn die Komponente gemountet wird
     connectSocket();
 
-    // Aufräumfunktion: Listener entfernen, wenn die Komponente unmounted wird
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
-      socket.off('game:start', handleGameStart); // Entferne Listener
-      // Optional: Verbindung trennen, wenn App unmounted wird?
-      // disconnectSocket();
+      socket.off('game:start', handleGameStart);
     };
-  }, [setConnected, resetState, setCurrentGameData, setCurrentLobbyId]); // Abhängigkeiten für den Effekt
+  }, [setConnected, resetState, setCurrentLobbyId, setGameState]);
 
-  // Handler für die Namensänderung im Input-Feld
   const handleUsernameChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setInputUsername(event.target.value);
+      setInputUsername(event.target.value);
+  };
+  
+  const handleLogin = (event: React.FormEvent) => {
+      event.preventDefault(); 
+      if (inputUsername.trim() && isConnected) {
+          setIsLoading(true);
+          socket.emit('player:login', inputUsername.trim(), (response: any) => {
+              console.log('Login-Antwort vom Server:', response);
+              if (response?.success && response?.playerId) { 
+                  setStoreUsername(inputUsername.trim());
+                  setPlayerId(response.playerId);
+                  setInputUsername(''); 
+              } else {
+                  alert(response?.message || 'Login fehlgeschlagen');
+              }
+              setIsLoading(false);
+          });
+      }
   };
 
-  // Handler für das Absenden des Benutzernamens
-  const handleLogin = (event: React.FormEvent) => {
-    event.preventDefault(); // Verhindert Neuladen der Seite
-    if (inputUsername.trim() && isConnected) {
-      setIsLoading(true);
-      console.log(`Sende 'player:login' mit Benutzername: ${inputUsername}`);
-      // Sende den Benutzernamen an den Server
-      socket.emit('player:login', inputUsername.trim(), (response: any) => {
-        console.log('Login-Antwort vom Server:', response);
-        if (response?.success && response?.playerId) {
-          setStoreUsername(inputUsername.trim());
-          setPlayerId(response.playerId);
-          setInputUsername('');
-        } else {
-          alert(response?.message || 'Login fehlgeschlagen');
-        }
-        setIsLoading(false);
-      });
-    }
-  };
+  // --- Debugging Log ---
+  console.log('[App Render] Zustand:', {
+    isConnected,
+    username,
+    playerId,
+    currentLobbyId,
+    gameState,
+  });
 
   // --- Rendering Logic ---
   let content;
+  console.log('[App Render] Evaluiere content...'); // Log Start
   if (!isConnected) {
+      console.log('[App Render] => Zweig: !isConnected');
       content = <p>Verbinde zum Server...</p>;
   } else if (!username) {
-      // Login Formular
+      console.log('[App Render] => Zweig: !username (Login Form)');
       content = (
           <form onSubmit={handleLogin}>
               <h2>Benutzernamen eingeben</h2>
@@ -113,34 +108,33 @@ function App() {
               </button>
           </form>
       );
-  } else if (currentGameData) {
-      // Spielansicht (Platzhalter)
-      content = <div><h2>Spiel läuft! (Lobby: {currentGameData.lobbyId})</h2><p>Spielansicht hier implementieren...</p></div>; 
-      // Später: content = <GameScreen gameData={currentGameData} />;
+  } else if (gameState) { 
+      console.log('[App Render] => Zweig: gameState');
+      content = <GameScreen />;
   } else if (currentLobbyId) {
-      // Lobby Menü
+      console.log('[App Render] => Zweig: currentLobbyId');
       content = <LobbyMenu />;
   } else {
-      // Lobby Browser
+      console.log('[App Render] => Zweig: else (LobbyBrowser)');
       content = <LobbyBrowser />;
   }
+  console.log('[App Render] Zugewiesener content:', content ? content.type.name || typeof content.type : 'null'); // Logge Typ des Inhalts
 
   return (
     <div className="App">
       <header className="App-header">
         <h1>Fracture Protocol</h1>
         <p>Verbindungsstatus: {isConnected ? 'Verbunden' : 'Nicht verbunden'}</p>
-        {/* Zeige Status nur wenn eingeloggt */}
         {username && 
           <p>
             Eingeloggt als: {username} (ID: {playerId}) 
             {currentLobbyId ? `| In Lobby: ${currentLobbyId.substring(0,6)}...` : ''}
-            {currentGameData ? `| Im Spiel (Lobby: ${currentGameData.lobbyId.substring(0,6)}...)` : ''}
+            {gameState ? `| Im Spiel (ID: ${gameState.gameId.substring(0,6)}...)` : ''}
           </p>
         }
       </header>
       <main>
-        {content} { /* Rendere den ausgewählten Inhalt */ }
+        {content}
       </main>
     </div>
   );
