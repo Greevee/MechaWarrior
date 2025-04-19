@@ -3,7 +3,12 @@ import { io, Socket } from 'socket.io-client';
 // Die URL deines Backend-Servers
 // Vite stellt Umgebungsvariablen über import.meta.env bereit
 // Nur Variablen mit dem Präfix VITE_ werden exposed.
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+// const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+
+// Verwende den gleichen Hostnamen wie der Client, aber Port 3000
+const serverHostname = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+const SERVER_URL = `http://${serverHostname}:3000`; 
+console.log(`Versuche Verbindung zu Server auf: ${SERVER_URL}`); // Logging der verwendeten URL
 
 // Erstelle die Socket-Instanz
 // `autoConnect: false` bedeutet, dass wir die Verbindung manuell starten

@@ -2,65 +2,161 @@ import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react';
 import { usePlayerStore } from '../store/playerStore';
 import { useGameStore } from '../store/gameStore';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Box, Plane, Sphere, useGLTF } from '@react-three/drei';
+import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { PlayerInGame, PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState } from '../types/game.types';
 import { socket } from '../socket';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
 
+// --- Health Bar Component ---
+const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = ({ currentHP, maxHP, scale }) => {
+    const healthRatio = Math.max(0, currentHP / maxHP);
+    const barWidth = 1.0 * scale; // Basisbreite des Balkens, skaliert mit Modell
+    const barHeight = 0.1 * scale; // Basishöhe des Balkens, skaliert mit Modell
+    const yOffset = 1.0 * scale; // Wie weit über dem Figuren-Ursprung (skaliert)
+
+    return (
+        <Billboard position={[0, yOffset, 0]}>
+            {/* Hintergrund (Rot/Dunkel) */}
+            <Plane args={[barWidth, barHeight]}>
+                <meshBasicMaterial color="#660000" side={THREE.DoubleSide} />
+            </Plane>
+            {/* Vordergrund (Grün) */}
+            <Plane 
+                args={[barWidth * healthRatio, barHeight]} 
+                // Positioniere linksbündig auf dem Hintergrund
+                position={[-(barWidth * (1 - healthRatio)) / 2, 0, 0.01]} // Leicht davor
+            >
+                <meshBasicMaterial color="#00cc00" side={THREE.DoubleSide} />
+            </Plane>
+        </Billboard>
+    );
+};
+
 // --- Figure Mesh Component --- 
 const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
-    const meshRef = useRef<THREE.Group>(null!); // Ref für das Modell (Group)
-    const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z)); // Y = 0 für Basis
+    const meshRef = useRef<THREE.Group>(null!); 
+    const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z));
     const targetPosition = useMemo(() => new THREE.Vector3(figureData.position.x, 0, figureData.position.z), [
         figureData.position.x, figureData.position.z
     ]);
+    const lastPosition = useRef(new THREE.Vector3().copy(interpolatedPosition.current));
+    const [yOffset, setYOffset] = useState(0);
 
-    // Lade das Modell nur für human_infantry
+    const unitData = useMemo(() => placeholderUnits.find(u => u.id === figureData.unitTypeId), [figureData.unitTypeId]);
+    const modelScale = unitData?.modelScale ?? 1;
+    const maxHP = unitData?.hp ?? 100; 
+
+    // Lade das Modell NUR für human_infantry
     const isSoldier = figureData.unitTypeId === 'human_infantry';
-    // Pfad zum Modell - stelle sicher, dass es in public/models/ liegt!
     const modelPath = '/models/soldier.glb'; 
-    const { scene } = useGLTF(isSoldier ? modelPath : ''); // Nur laden, wenn isSoldier true
+    // Verwende useGLTF nur, wenn es ein Soldat ist
+    const gltf = isSoldier ? useGLTF(modelPath) : null;
+    const scene = gltf?.scene;
+
+    // Effekt zum Berechnen des Y-Offsets, WENN das Modell geladen ist
+    useEffect(() => {
+        // Nur ausführen, wenn es ein Soldat ist, die Szene geladen wurde UND das Mesh-Ref existiert
+        if (isSoldier && scene && meshRef.current) {
+            // Stelle sicher, dass das Objekt sichtbar ist und eine Geometrie hat, bevor die Box berechnet wird
+            let validObjectFound = false;
+            scene.traverse((child) => {
+                 // Linter-Fix: Prüfe, ob child ein Mesh ist, bevor auf Mesh-Eigenschaften zugegriffen wird
+                if (!validObjectFound && child instanceof THREE.Mesh && child.geometry) {
+                    validObjectFound = true;
+                }
+            });
+
+            if (validObjectFound) {
+                // Wende die Skalierung auf das meshRef AN, BEVOR die BBox berechnet wird
+                meshRef.current.scale.set(modelScale, modelScale, modelScale);
+                meshRef.current.updateMatrixWorld(true); // Erzwinge Matrix-Update
+
+                const box = new THREE.Box3().setFromObject(meshRef.current);
+                const modelHeightOffset = box.min.y; // Wie weit geht das Modell unter den Pivot?
+                // Setze den Offset nur, wenn die Box gültig ist (nicht unendlich)
+                if (box.min.y !== Infinity && box.min.y !== -Infinity) {
+                     console.log(`Calculated Y offset for ${figureData.unitTypeId} (Scale: ${modelScale}): ${modelHeightOffset.toFixed(3)}`);
+                     setYOffset(-modelHeightOffset);
+                } else {
+                    console.warn(`Could not calculate valid bounding box for ${figureData.unitTypeId}. Using Y-Offset 0.`);
+                    setYOffset(0);
+                }
+                 // Skalierung nach Berechnung zurücksetzen? Nein, sie wird im Frame neu gesetzt.
+            } else {
+                 console.warn(`No valid mesh found in the loaded scene for ${figureData.unitTypeId} to calculate Y-Offset.`);
+                 setYOffset(0);
+            }
+        } else if (!isSoldier) {
+            // Für Nicht-Soldaten (Kugeln) den Offset zurücksetzen oder anpassen
+            setYOffset(0.5 * modelScale); // Kugelmittelpunkt ist auf halber Höhe
+        }
+        // Füge modelScale als Abhängigkeit hinzu, falls sich die Skala ändern kann
+    }, [scene, isSoldier, figureData.unitTypeId, modelScale]);
 
     useFrame((state, delta) => {
+        // Zielposition inkl. dynamischem Y-Offset
+        targetPosition.set(figureData.position.x, yOffset, figureData.position.z);
         interpolatedPosition.current.lerp(targetPosition, 0.1);
+        
+        const movementDirection = interpolatedPosition.current.clone().sub(lastPosition.current);
+        lastPosition.current.copy(interpolatedPosition.current);
+
         if (meshRef.current) {
             meshRef.current.position.copy(interpolatedPosition.current);
-            // TODO: Rotation anpassen, wenn sich die Figur bewegt oder angreift?
+             // Setze Skalierung für Modell ODER Kugel
+            meshRef.current.scale.set(modelScale, modelScale, modelScale);
+
+            const moveLengthSq = movementDirection.lengthSq();
+            if (moveLengthSq > 0.0001) { 
+                const angle = Math.atan2(movementDirection.x, movementDirection.z);
+                 // Direkte Rotation, falls Lerp Probleme macht:
+                 // meshRef.current.rotation.y = angle;
+                // Sanfte Rotation:
+                meshRef.current.rotation.y = THREE.MathUtils.lerp(meshRef.current.rotation.y, angle, 0.1);
+            }
         }
     });
 
-    // Wenn es ein Soldat ist, rendere das Modell
-    if (isSoldier && scene) {
-        // Klonen der Szene ist wichtig, wenn mehrere Instanzen desselben Modells verwendet werden
+    // Entscheide, was gerendert wird (Modell oder Kugel)
+    let figureVisual;
+    // Zeige Modell NUR wenn isSoldier UND scene geladen ist
+    if (isSoldier && scene) { 
         const clonedScene = useMemo(() => scene.clone(), [scene]);
-        return (
+        figureVisual = (
             <primitive 
-                ref={meshRef} 
                 object={clonedScene} 
-                scale={0.5} // Beispiel: Skalierung anpassen
-                position={[figureData.position.x, 0, figureData.position.z]} // Y=0, da Modell Ursprung am Boden haben sollte
-                // rotation={[0, Math.PI, 0]} // Beispiel: Drehung, falls nötig
+                // Skalierung und Position werden im Frame gesetzt
                 userData={{ figureId: figureData.figureId }}
             />
         );
     } else {
-        // Fallback: Rendere die Kugel für andere Einheiten oder wenn Modell noch nicht geladen
+        // Zeige Kugel für ALLE anderen Fälle (nicht Soldat ODER Szene noch nicht geladen)
         const color = figureData.playerId === usePlayerStore.getState().playerId ? "royalblue" : "indianred";
-        return (
+        figureVisual = (
             <Sphere 
-                // @ts-ignore - meshRef ist hier für Sphere nicht ganz korrekt, aber für Position ok
-                ref={meshRef} 
-                key={figureData.figureId} 
-                args={[0.4, 16, 16]} 
-                position={[figureData.position.x, 0.5, figureData.position.z]} // Kugel leicht anheben
+                args={[0.4, 16, 16]} // Basisgröße, Skalierung erfolgt über Group
+                // Position wird im Frame gesetzt
                 userData={{ figureId: figureData.figureId }}
             >
                 <meshStandardMaterial color={color} />
             </Sphere>
         );
+        // Stelle sicher, dass der Y-Offset für die Kugel im Frame korrekt gesetzt wird
+        // (passiert bereits im useEffect/useFrame oben)
     }
+
+    return (
+        // Group wird skaliert und positioniert
+        <group ref={meshRef} key={figureData.figureId}>
+            {figureVisual} 
+            {figureData.currentHP < maxHP && 
+                // Skaliere HealthBar NICHT hier, da die Group schon skaliert wird
+                <HealthBar currentHP={figureData.currentHP} maxHP={maxHP} scale={1.0} /> // Skala 1, da Eltern-Group skaliert
+            }
+        </group>
+    );
 };
 
 // --- Placed Unit Mesh (rendert jetzt FigureMesh-Komponenten) ---
@@ -490,7 +586,7 @@ const GameScreen: React.FC = () => {
       </div>
       <div className="game-controls unit-pool">
         <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
-        <div className="unit-list">
+        <div className="unit-tiles-grid"> 
           {availableUnits.map((unit: Unit) => {
             const isUnlocked = selfPlayer?.unlockedUnits.includes(unit.id);
             const canAffordUnlock = selfPlayer ? selfPlayer.credits >= unit.unlockCost : false;
@@ -498,27 +594,53 @@ const GameScreen: React.FC = () => {
             const unlockingThis = isUnlocking === unit.id;
             const isSelectedForPlacement = selectedUnitForPlacement?.id === unit.id;
 
+            // Bestimme, ob die Kachel überhaupt klickbar sein soll
+            const isDisabled = unlockingThis || // Wenn gerade freigeschaltet wird
+                             (!isUnlocked && !canAffordUnlock) || // Wenn gesperrt & nicht leisten können
+                             (isUnlocked && !canAffordPlacement) || // Wenn frei & nicht leisten können
+                             (isUnlocked && !!selectedUnitForPlacement && !isSelectedForPlacement); // Wenn frei, aber ANDERE Einheit gewählt ist
+
+            const handleClick = () => {
+                if (!isUnlocked) {
+                    handleUnlockUnit(unit.id);
+                } else {
+                    // Wenn diese bereits ausgewählt ist, Auswahl aufheben
+                    if (isSelectedForPlacement) {
+                        setSelectedUnitForPlacement(null);
+                    } else {
+                        handleSelectUnitForPlacement(unit);
+                    }
+                }
+            };
+
             return (
-              <div key={unit.id} className={`unit-item ${isUnlocked ? 'unlocked' : ''} ${isSelectedForPlacement ? 'selected-for-placement' : ''}`}>
-                <span>{unit.name} ({unit.icon})</span>
-                <span>U:{unit.unlockCost} P:{unit.placementCost}</span>
-                
-                {!isUnlocked ? (
-                  <button 
-                     onClick={() => handleUnlockUnit(unit.id)}
-                     disabled={!canAffordUnlock || !!isUnlocking}
-                  >
-                    {unlockingThis ? '...' : 'Freischalten'}
-                  </button>
-                ) : (
-                  <button 
-                     onClick={() => handleSelectUnitForPlacement(unit)}
-                     disabled={!canAffordPlacement || !!selectedUnitForPlacement}
-                  >
-                    Platzieren
-                  </button>
+              <button 
+                key={unit.id} 
+                className={`unit-tile ${isUnlocked ? 'unlocked' : 'locked'} ${isSelectedForPlacement ? 'selected-for-placement' : ''}`}
+                onClick={handleClick}
+                disabled={isDisabled}
+                title={`${unit.name}\nUnlock: ${unit.unlockCost}C\nPlace: ${unit.placementCost}C${!isUnlocked ? '\n(Click to Unlock)' : '\n(Click to Place)'}`}
+              >
+                {/* Schloss-Icon (wenn gesperrt) */}
+                {!isUnlocked && (
+                    <div className="unit-tile-lock" aria-hidden="true">🔒</div>
                 )}
-              </div>
+
+                {/* --- HIER kommt die Grafik rein --- */}
+                <img 
+                    src={`/assets/units/${unit.id}.png`} 
+                    alt={unit.name} 
+                    onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} // Bild verstecken, Text zeigen bei Fehler
+                    loading="lazy"
+                />
+                {/* Fallback-Text, falls Bild nicht lädt */}
+                <span className="unit-tile-fallback hidden">{unit.icon || unit.id.substring(0,3)}</span> 
+                
+                {/* Kostenanzeige */}
+                <div className="unit-tile-cost">
+                    {isUnlocked ? `${unit.placementCost} C` : `${unit.unlockCost} C`}
+                </div>
+              </button>
             );
           })}
         </div>
@@ -527,4 +649,4 @@ const GameScreen: React.FC = () => {
   );
 };
 
-export default GameScreen; 
+export default GameScreen;

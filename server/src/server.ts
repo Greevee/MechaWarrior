@@ -19,7 +19,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:5173", // Erlaube Anfragen vom Frontend (Vite Standardport)
+    origin: [
+        process.env.CLIENT_URL || "http://localhost:5173", // Behalte den bisherigen Standard
+        "http://greeve.duckdns.org:5173" // Füge die DuckDNS Adresse hinzu
+    ],
     methods: ["GET", "POST"]
   }
 });

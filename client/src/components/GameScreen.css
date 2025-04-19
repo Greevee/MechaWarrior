@@ -69,49 +69,115 @@
 }
 
 .unit-pool {
-  bottom: 10px;
-  right: 10px;
-  max-height: 300px; /* Beispiel: Höhe begrenzen */
-  overflow-y: auto; /* Scrollbar bei Bedarf */
+  bottom: 20px;
+  right: 20px;
+  /* Keine feste Breite mehr, passt sich dem Grid an */
+  max-height: 600px; /* Deutlich höher als vorher, ca. doppelt */
 }
 
-.unit-list {
-  max-height: 200px; /* Beispiel: Begrenzte Höhe mit Scrollbar */
-  overflow-y: auto;
-  margin-top: 10px;
+/* NEUE Kachel-Styles */
+.unit-tiles-grid {
+  display: grid;
+  /* grid-template-columns: repeat(auto-fill, 50px); */ /* Alt */
+  grid-template-columns: repeat(auto-fill, 100px); /* Kacheln sind jetzt 100px breit */
+  /* gap: 8px; */ /* Alt */
+  gap: 10px; /* Etwas mehr Abstand */
+  padding-top: 10px;
+  /* max-height: calc(40vh - 70px); */ /* Höhe wird jetzt durch .unit-pool bestimmt */
+  overflow-y: auto; /* Scrollbar, wenn Kacheln nicht passen */
 }
 
-.unit-item {
+.unit-tile {
+  /* width: 50px; */ /* Alt */
+  /* height: 50px; */ /* Alt */
+  width: 100px; /* Neue Größe */
+  height: 100px; /* Neue Größe */
+  padding: 0;
+  border: 2px solid #555;
+  background-color: #333;
+  cursor: pointer;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  justify-content: center;
   align-items: center;
-  padding: 5px;
-  margin-bottom: 5px;
-  border: 1px solid #666;
-  border-radius: 3px;
-  background-color: rgba(255, 255, 255, 0.1);
+  overflow: hidden; 
+  position: relative; /* Wichtig für absolute Kinder */
+  transition: border-color 0.2s ease, background-color 0.2s ease;
 }
 
-.unit-item span {
-  margin-right: 8px;
+.unit-tile:hover:not(:disabled) {
+  border-color: #aaa;
 }
 
-.unit-item button {
-    padding: 2px 6px;
-    font-size: 0.9em;
+.unit-tile.locked {
+  background-color: #222;
+  border-color: #444;
 }
 
-.unit-item.unlocked {
-  opacity: 0.6;
-  background-color: rgba(100, 100, 100, 0.2);
+.unit-tile.selected-for-placement {
+  border-color: gold;
+  box-shadow: 0 0 8px gold;
 }
 
-.unit-item.unlocked button {
-  cursor: default;
+.unit-tile:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  border-color: #444;
+}
+
+.unit-tile img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain; 
+  /* Optional: Leicht abdunkeln, wenn Text/Icon drüber liegt */
+  /* filter: brightness(0.8); */ 
+}
+
+.unit-tile-fallback {
+  color: #ccc;
+  font-size: 12px; /* Etwas größer */
+  text-align: center;
+}
+
+/* NEU: Styles für Kostenanzeige */
+.unit-tile-cost {
+    position: absolute;
+    bottom: 5px; /* Position am unteren Rand */
+    left: 0;
+    right: 0;
+    text-align: center;
+    background-color: rgba(0, 0, 0, 0.7); /* Dunkler Hintergrund für Lesbarkeit */
+    color: gold; 
+    font-size: 14px;
+    font-weight: bold;
+    padding: 2px 0;
+    pointer-events: none; /* Ignoriert Maus-Events */
+    z-index: 2; /* Über dem Bild */
+}
+
+/* NEU: Styles für Schloss-Icon */
+.unit-tile-lock {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 40px; /* Große Schriftgröße für das Icon */
+    color: white;
+    opacity: 0.6; /* Transparent */
+    pointer-events: none; /* Ignoriert Maus-Events */
+    z-index: 1; /* Über dem Bild, aber unter Kosten falls nötig */
+    text-shadow: 0 0 5px black; /* Bessere Sichtbarkeit */
+}
+
+.hidden {
+    display: none;
 }
 
 /* Hervorhebung für ausgewählte Einheit */
+/* (Dieser Stil wird nicht mehr benötigt, da .selected-for-placement direkt auf .unit-tile angewendet wird) */
+/* 
 .unit-item.selected-for-placement {
   outline: 2px solid yellow;
   box-shadow: 0 0 5px yellow;
-} 
+}
+*/ 

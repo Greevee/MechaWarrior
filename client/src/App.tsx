@@ -122,17 +122,6 @@ function App() {
 
   return (
     <div className="App">
-      <header className="App-header">
-        <h1>Fracture Protocol</h1>
-        <p>Verbindungsstatus: {isConnected ? 'Verbunden' : 'Nicht verbunden'}</p>
-        {username && 
-          <p>
-            Eingeloggt als: {username} (ID: {playerId}) 
-            {currentLobbyId ? `| In Lobby: ${currentLobbyId.substring(0,6)}...` : ''}
-            {gameState ? `| Im Spiel (ID: ${gameState.gameId.substring(0,6)}...)` : ''}
-          </p>
-        }
-      </header>
       <main>
         {content}
       </main>

@@ -21,6 +21,7 @@ export interface Unit {
   speed: number;         // Bewegungsgeschwindigkeit (Felder pro Sekunde?)
   bulletSpeed?: number; // NEU: Geschwindigkeit der Geschosse (optional)
   collisionRange?: number; // NEU: Radius für Kollisionserkennung (optional)
+  modelScale?: number; // NEU: Skalierungsfaktor für das 3D-Modell (optional)
 }
 
 export const placeholderUnits: Unit[] = [
@@ -44,7 +45,31 @@ export const placeholderUnits: Unit[] = [
     icon: 'human_infantry_icon',
     speed: 2,
     bulletSpeed: 15,
-    collisionRange: 0.5
+    collisionRange: 0.5,
+    modelScale: 0.5
+  },
+  {
+    id: 'human_sniper',
+    name: 'Sniper Team',
+    faction: 'Human',
+    width: 1,
+    height: 1,
+    squadSize: 2,
+    damage: 75,
+    attackSpeed: 0.25,
+    splashRadius: 0,
+    range: 30,
+    hp: 60,
+    armor: 0.05,
+    damageReduction: 0,
+    shield: 0,
+    placementCost: 100,
+    unlockCost: 0,
+    icon: 'human_sniper_icon',
+    speed: 1.5,
+    bulletSpeed: 40,
+    collisionRange: 0.4,
+    modelScale: 0.5
   },
   {
     id: 'machine_guardian',
@@ -66,7 +91,8 @@ export const placeholderUnits: Unit[] = [
     icon: 'machine_guardian_icon',
     speed: 1.5,
     bulletSpeed: 20,
-    collisionRange: 0.8
+    collisionRange: 0.8,
+    modelScale: 1.0
   },
   {
     id: 'alien_stalker',
@@ -88,6 +114,7 @@ export const placeholderUnits: Unit[] = [
     icon: 'alien_stalker_icon',
     speed: 3,
     bulletSpeed: 25,
-    collisionRange: 0.4
+    collisionRange: 0.4,
+    modelScale: 0.8
   }
 ]; 
