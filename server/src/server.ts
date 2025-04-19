@@ -104,8 +104,8 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('lobby:join', (lobbyId: string, callback: (response: any) => void) => {
-    const playerId = socket.data.playerId;
-    const username = socket.data.username;
+      const playerId = socket.data.playerId;
+      const username = socket.data.username;
     if (!playerId || !username) return callback({ success: false, message: 'Nicht eingeloggt.' });
 
     const result = lobbyManager.joinLobby(lobbyId, playerId, username, socket.id);
@@ -131,7 +131,7 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('lobby:set-ready', (data: { lobbyId: string, isReady: boolean }) => {
-    const playerId = socket.data.playerId;
+      const playerId = socket.data.playerId;
     if (!playerId) return;
     const updatedLobby = lobbyManager.setReady(data.lobbyId, playerId, data.isReady);
     if (updatedLobby) {
@@ -141,7 +141,7 @@ io.on('connection', (socket: Socket) => {
   });
 
   socket.on('lobby:start-game', (lobbyId: string, callback: (response: any) => void) => {
-    const playerId = socket.data.playerId;
+      const playerId = socket.data.playerId;
     if (!playerId) return callback({ success: false, message: 'Fehler: Spieler-ID nicht gefunden.' });
 
     const readyCheck = lobbyManager.checkLobbyReadyForStart(lobbyId, playerId);
@@ -157,9 +157,9 @@ io.on('connection', (socket: Socket) => {
         // Sende Spielstart-Event mit initialem State
         const playersArray = Array.from(initialGameState.players.values());
         io.to(lobbyId).emit('game:start', { ...initialGameState, players: playersArray });
-        console.log(`'game:start' Event mit initialem GameState an Raum ${lobbyId} gesendet.`);
+      console.log(`'game:start' Event mit initialem GameState an Raum ${lobbyId} gesendet.`);
         io.emit('lobby:list', lobbyManager.getSerializableLobbyList()); // Update global list
-        callback({ success: true });
+      callback({ success: true });
     } else {
         callback({ success: false, message: 'Fehler beim Erstellen des Spiels.' });
     }
@@ -167,14 +167,14 @@ io.on('connection', (socket: Socket) => {
 
   // --- Game Handlers (Delegation an GameManager) ---
   socket.on('game:force-start-combat', (gameId: string, callback: (response: any) => void) => {
-    const playerId = socket.data.playerId;
+      const playerId = socket.data.playerId;
     if (!playerId) return callback({ success: false, message: 'Fehler: Spieler-ID nicht gefunden.' });
     const result = gameManager.forceStartCombat(gameId, playerId);
     callback(result);
   });
 
   socket.on('game:unlock-unit', (data: { gameId: string, unitId: string }, callback: (response: any) => void) => {
-    const playerId = socket.data.playerId;
+      const playerId = socket.data.playerId;
     if (!playerId) return callback({ success: false, message: 'Fehler: Spieler-ID nicht gefunden.' });
     const result = gameManager.unlockUnit(data.gameId, playerId, data.unitId);
     callback(result);
