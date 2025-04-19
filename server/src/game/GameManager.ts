@@ -335,8 +335,8 @@ export class GameManager {
         const figureMap = new Map<string, FigureState>();
         gameState.players.forEach(player => {
             player.placedUnits.forEach(unit => {
-                unit.figures.forEach(figure => {
-                    if (figure.currentHP > 0) figureMap.set(figure.figureId, figure);
+                unit.figures.forEach(fig => {
+                    if (fig.currentHP > 0) figureMap.set(fig.figureId, fig);
                 });
             });
         });
@@ -384,7 +384,7 @@ export class GameManager {
              } else {
                  figure.targetFigureId = null; // Altes Ziel verloren/tot
                  let nearestTarget: FigureState | null = null;
-                 let minDistSq = unitData.range * unitData.range * 4; // Suche in doppelter Reichweite?
+                 let minDistSq: number = Infinity; // Start mit unendlicher Distanz
                  figureMap.forEach((potentialTarget: FigureState) => {
                      if (potentialTarget.playerId !== figure.playerId) {
                          const distSq = this.calculateDistanceSq(figure.position, potentialTarget.position);
@@ -394,9 +394,9 @@ export class GameManager {
                          }
                      }
                  });
-                 if (nearestTarget) {
-                     // Nur zuweisen, wenn nearestTarget nicht null ist
-                     figure.targetFigureId = nearestTarget.figureId;
+                 // Nur zuweisen, wenn nearestTarget nicht null ist
+                 if (nearestTarget !== null) {
+                     figure.targetFigureId = (nearestTarget as FigureState).figureId; // Erneute explizite Assertion
                      targetAcquired = true;
                      unitsChanged = true;
                  }

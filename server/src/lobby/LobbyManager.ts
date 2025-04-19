@@ -123,7 +123,7 @@ export class LobbyManager {
         const lobby = this.activeLobbies.get(lobbyId);
         const player = lobby?.players.get(playerId);
 
-        if (player && !player.isReady) { // Allow change only if not ready
+        if (lobby && player && !player.isReady) { // Allow change only if not ready
             player.selectedFaction = faction;
             console.log(`LobbyManager: Spieler ${player.username} in Lobby ${lobbyId} wählt Fraktion: ${faction}`);
             return this.getSerializableLobby(lobby);
@@ -136,7 +136,7 @@ export class LobbyManager {
         const player = lobby?.players.get(playerId);
 
         // Can only be ready if faction is selected
-        if (player && player.selectedFaction) {
+        if (lobby && player && player.selectedFaction) {
             player.isReady = isReady;
             console.log(`LobbyManager: Spieler ${player.username} in Lobby ${lobbyId} ist jetzt ${isReady ? 'bereit' : 'nicht bereit'}.`);
             return this.getSerializableLobby(lobby);
