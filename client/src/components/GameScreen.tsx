@@ -42,6 +42,7 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = React.memo(({ figureDa
     ]);
     const lastPosition = useRef(new THREE.Vector3().copy(interpolatedPosition.current));
     const [yOffset, setYOffset] = useState(0);
+    const facingScaleX = useRef(1); // Ref für die horizontale Ausrichtung (1 = rechts, -1 = links)
 
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === figureData.unitTypeId), [figureData.unitTypeId]);
     const modelScale = unitData?.modelScale ?? 1;
@@ -95,6 +96,26 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = React.memo(({ figureDa
         const movementDirection = interpolatedPosition.current.clone().sub(lastPosition.current);
         lastPosition.current.copy(interpolatedPosition.current);
 
+        const moveThreshold = 0.001; // Kleiner Schwellenwert
+
+        if (figureData.behavior === 'attacking') {
+            // Im Kampf: Feste Ausrichtung basierend auf Z-Position relativ zur Mitte (Annahme: Mitte bei Z=25)
+            const centerZ = 25;
+            if (figureData.position.z < centerZ) {
+                facingScaleX.current = 1; // Unterhalb der Mitte -> schaue nach +Z (angenommen Skala 1)
+            } else {
+                facingScaleX.current = -1; // Oberhalb der Mitte -> schaue nach -Z (angenommen Skala -1)
+            }
+        } else {
+            // Außerhalb des Kampfes: Ausrichtung basierend auf Bewegungsrichtung (Z-Achse)
+            if (movementDirection.z < -moveThreshold) {
+                facingScaleX.current = -1; // Nach -Z bewegen -> spiegeln (Skala -1)
+            } else if (movementDirection.z > moveThreshold) {
+                facingScaleX.current = 1; // Nach +Z bewegen -> normal (Skala 1)
+            }
+            // Bei sehr kleiner Bewegung: Richtung beibehalten
+        }
+
         if (meshRef.current) {
             meshRef.current.position.copy(interpolatedPosition.current);
              // Skalierung wird jetzt über die Plane-args gesteuert, nicht mehr über die Group
@@ -115,7 +136,7 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = React.memo(({ figureDa
         <group ref={meshRef} key={figureData.figureId}>
             <Billboard>             
                  {/* Original Sprite-Plane */}
-                 <Plane args={[spriteWidth, spriteHeight]}>
+                 <Plane args={[spriteWidth, spriteHeight]} scale={[facingScaleX.current, 1, 1]}>
                       <meshBasicMaterial
                          color="white" // Explizit auf Weiß setzen
                          map={spriteTexture} // Verwende die dynamisch geladene Textur
