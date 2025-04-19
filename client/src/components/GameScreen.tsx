@@ -2,12 +2,13 @@ import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react';
 import { usePlayerStore } from '../store/playerStore';
 import { useGameStore } from '../store/gameStore';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard } from '@react-three/drei';
+import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { PlayerInGame, PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState } from '../types/game.types';
 import { socket } from '../socket';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
+import { PlacementSystem } from './PlacementSystem';
 
 // --- Health Bar Component ---
 const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = ({ currentHP, maxHP, scale }) => {
@@ -48,52 +49,21 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
     const modelScale = unitData?.modelScale ?? 1;
     const maxHP = unitData?.hp ?? 100; 
 
-    // Lade das Modell NUR für human_infantry
-    const isSoldier = figureData.unitTypeId === 'human_infantry';
-    const modelPath = '/models/soldier.glb'; 
-    // Verwende useGLTF nur, wenn es ein Soldat ist
-    const gltf = isSoldier ? useGLTF(modelPath) : null;
-    const scene = gltf?.scene;
+    // --- Sprite Loading ---
+    // TODO: Dynamischen Pfad basierend auf figureData.unitTypeId verwenden
+    const spriteTexture = useTexture('/sprites/figure_placeholder.png'); 
+    // Ladefehler abfangen und Standardwerte verwenden
+    const aspectWidth = spriteTexture?.image?.width ?? 1;
+    const aspectHeight = spriteTexture?.image?.height ?? 1;
+    const spriteAspect = aspectWidth / aspectHeight;
 
-    // Effekt zum Berechnen des Y-Offsets, WENN das Modell geladen ist
+    const spriteHeight = 1.0 * modelScale; // Basis-Höhe, skaliert mit modelScale
+    const spriteWidth = spriteHeight * spriteAspect;
+
+    // Einfacher Y-Offset für Sprites (halbe Höhe)
     useEffect(() => {
-        // Nur ausführen, wenn es ein Soldat ist, die Szene geladen wurde UND das Mesh-Ref existiert
-        if (isSoldier && scene && meshRef.current) {
-            // Stelle sicher, dass das Objekt sichtbar ist und eine Geometrie hat, bevor die Box berechnet wird
-            let validObjectFound = false;
-            scene.traverse((child) => {
-                 // Linter-Fix: Prüfe, ob child ein Mesh ist, bevor auf Mesh-Eigenschaften zugegriffen wird
-                if (!validObjectFound && child instanceof THREE.Mesh && child.geometry) {
-                    validObjectFound = true;
-                }
-            });
-
-            if (validObjectFound) {
-                // Wende die Skalierung auf das meshRef AN, BEVOR die BBox berechnet wird
-                meshRef.current.scale.set(modelScale, modelScale, modelScale);
-                meshRef.current.updateMatrixWorld(true); // Erzwinge Matrix-Update
-
-                const box = new THREE.Box3().setFromObject(meshRef.current);
-                const modelHeightOffset = box.min.y; // Wie weit geht das Modell unter den Pivot?
-                // Setze den Offset nur, wenn die Box gültig ist (nicht unendlich)
-                if (box.min.y !== Infinity && box.min.y !== -Infinity) {
-                     console.log(`Calculated Y offset for ${figureData.unitTypeId} (Scale: ${modelScale}): ${modelHeightOffset.toFixed(3)}`);
-                     setYOffset(-modelHeightOffset);
-                } else {
-                    console.warn(`Could not calculate valid bounding box for ${figureData.unitTypeId}. Using Y-Offset 0.`);
-                    setYOffset(0);
-                }
-                 // Skalierung nach Berechnung zurücksetzen? Nein, sie wird im Frame neu gesetzt.
-            } else {
-                 console.warn(`No valid mesh found in the loaded scene for ${figureData.unitTypeId} to calculate Y-Offset.`);
-                 setYOffset(0);
-            }
-        } else if (!isSoldier) {
-            // Für Nicht-Soldaten (Kugeln) den Offset zurücksetzen oder anpassen
-            setYOffset(0.5 * modelScale); // Kugelmittelpunkt ist auf halber Höhe
-        }
-        // Füge modelScale als Abhängigkeit hinzu, falls sich die Skala ändern kann
-    }, [scene, isSoldier, figureData.unitTypeId, modelScale]);
+        setYOffset(spriteHeight / 2);
+    }, [spriteHeight]);
 
     useFrame((state, delta) => {
         // Zielposition inkl. dynamischem Y-Offset
@@ -105,55 +75,60 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
 
         if (meshRef.current) {
             meshRef.current.position.copy(interpolatedPosition.current);
-             // Setze Skalierung für Modell ODER Kugel
-            meshRef.current.scale.set(modelScale, modelScale, modelScale);
+             // Skalierung wird jetzt über die Plane-args gesteuert, nicht mehr über die Group
+            // meshRef.current.scale.set(modelScale, modelScale, modelScale); // Entfernt
 
-            const moveLengthSq = movementDirection.lengthSq();
-            if (moveLengthSq > 0.0001) { 
-                const angle = Math.atan2(movementDirection.x, movementDirection.z);
-                 // Direkte Rotation, falls Lerp Probleme macht:
-                 // meshRef.current.rotation.y = angle;
-                // Sanfte Rotation:
-                meshRef.current.rotation.y = THREE.MathUtils.lerp(meshRef.current.rotation.y, angle, 0.1);
-            }
+            // Sprite-Ausrichtung zur Bewegungsrichtung (optional, hier vereinfacht)
+            // const moveLengthSq = movementDirection.lengthSq();
+            // if (moveLengthSq > 0.0001) { 
+                 // const angle = Math.atan2(movementDirection.x, movementDirection.z);
+                 // Bei Billboards ist Rotation oft nicht nötig oder wirkt seltsam.
+                 // meshRef.current.rotation.y = THREE.MathUtils.lerp(meshRef.current.rotation.y, angle, 0.1);
+            // }
         }
     });
 
-    // Entscheide, was gerendert wird (Modell oder Kugel)
-    let figureVisual;
-    // Zeige Modell NUR wenn isSoldier UND scene geladen ist
-    if (isSoldier && scene) { 
-        const clonedScene = useMemo(() => scene.clone(), [scene]);
-        figureVisual = (
-            <primitive 
-                object={clonedScene} 
-                // Skalierung und Position werden im Frame gesetzt
-                userData={{ figureId: figureData.figureId }}
-            />
-        );
-    } else {
-        // Zeige Kugel für ALLE anderen Fälle (nicht Soldat ODER Szene noch nicht geladen)
-        const color = figureData.playerId === usePlayerStore.getState().playerId ? "royalblue" : "indianred";
-        figureVisual = (
-            <Sphere 
-                args={[0.4, 16, 16]} // Basisgröße, Skalierung erfolgt über Group
-                // Position wird im Frame gesetzt
-                userData={{ figureId: figureData.figureId }}
-            >
-                <meshStandardMaterial color={color} />
-            </Sphere>
-        );
-        // Stelle sicher, dass der Y-Offset für die Kugel im Frame korrekt gesetzt wird
-        // (passiert bereits im useEffect/useFrame oben)
-    }
+    // Entferne GLTF-Lade-Logik
+    // const isSoldier = figureData.unitTypeId === 'human_infantry';
+    // const modelPath = '/models/soldier.glb'; 
+    // const gltf = isSoldier ? useGLTF(modelPath) : null;
+    // const scene = gltf?.scene;
+    // useEffect(() => { ... }, [scene, isSoldier, figureData.unitTypeId, modelScale]); // Entfernt
+
+    // Entferne bedingtes Rendern von Modell/Kugel
+    // let figureVisual;
+    // if (isSoldier && scene) { ... } else { ... } // Entfernt
 
     return (
-        // Group wird skaliert und positioniert
+        // Group wird NUR noch positioniert
         <group ref={meshRef} key={figureData.figureId}>
-            {figureVisual} 
+            <Billboard>
+                 {/* NEU: Schwarzer Umriss (dahinter und etwas größer) */}
+                 <Plane args={[spriteWidth + 0.08, spriteHeight + 0.08]}>
+                    <meshBasicMaterial
+                        color="black"
+                        transparent={true} // Muss transparent sein, um alphaTest/Map zu nutzen
+                        alphaMap={spriteTexture} // Benutze Alpha der Originaltextur
+                        alphaTest={0.1}        // Gleicher Alpha-Test
+                        side={THREE.DoubleSide}
+                    />
+                </Plane>
+                 {/* Original Sprite-Plane (leicht davor) */}
+                 <Plane args={[spriteWidth, spriteHeight]} position={[0, 0, 0.01]}>
+                     <meshBasicMaterial
+                        map={spriteTexture}
+                        transparent={true}
+                        side={THREE.DoubleSide} // Wichtig für Billboards
+                        alphaTest={0.1} // Verhindert teiltransparente Ränder
+                    />
+                </Plane>
+            </Billboard>
             {figureData.currentHP < maxHP && 
-                // Skaliere HealthBar NICHT hier, da die Group schon skaliert wird
-                <HealthBar currentHP={figureData.currentHP} maxHP={maxHP} scale={1.0} /> // Skala 1, da Eltern-Group skaliert
+                 // Position der HealthBar relativ zur Sprite-Höhe anpassen
+                 // Skaliere HealthBar relativ zur Sprite-Breite
+                 <group position={[0, spriteHeight, 0]}> {/* Leicht über dem Sprite */}
+                    <HealthBar currentHP={figureData.currentHP} maxHP={maxHP} scale={spriteWidth * 0.8} /> 
+                 </group>
             }
         </group>
     );
@@ -168,82 +143,6 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit }> = ({ placedUnit }) =>
             ))}
         </group>
     );
-};
-
-// Komponente zur Darstellung der Platzierungs-Vorschau
-const PlacementPreviewMesh: React.FC<{ unit: Unit, position: { x: number, z: number } }> = ({ unit, position }) => {
-  console.log('[PlacementPreviewMesh] Rendering preview for', unit.id, 'at', position);
-  const yOffset = 0.05; 
-  return (
-    <mesh 
-      position={[position.x, yOffset, position.z]} 
-      rotation={[-Math.PI / 2, 0, 0]} 
-    >
-      <planeGeometry args={[unit.width, unit.height]} /> 
-      <meshBasicMaterial 
-        color="yellow" 
-        transparent 
-        opacity={0.5} 
-        side={THREE.DoubleSide}
-      />
-    </mesh>
-  );
-};
-
-// NEU: Komponente zur Hervorhebung der Platzierungszone
-const PlacementZoneHighlight: React.FC<{ gameState: ClientGameState, playerId: number | null }> = ({ gameState, playerId }) => {
-  // Definiere Grid-Dimensionen (sollten mit Server übereinstimmen)
-  const GRID_WIDTH = 50;
-  const PLAYER_ZONE_DEPTH = 20;
-  const NEUTRAL_ZONE_DEPTH = 10;
-  const TOTAL_DEPTH = PLAYER_ZONE_DEPTH * 2 + NEUTRAL_ZONE_DEPTH;
-
-  // Berechne Grid-Grenzen (Ecken)
-  const gridMinX = -GRID_WIDTH / 2;
-  const gridMaxX = GRID_WIDTH / 2;
-  const gridMinZ = 0;
-  const gridMaxZ = TOTAL_DEPTH;
-
-  // Bestimme Spielerzone
-  let playerMinZ: number | null = null;
-  let playerMaxZ: number | null = null;
-
-  if (playerId !== null) {
-    const isHostPlacing = playerId === gameState.hostId;
-    if (isHostPlacing) {
-      playerMinZ = gridMinZ; // 0
-      playerMaxZ = PLAYER_ZONE_DEPTH;
-    } else {
-      playerMinZ = PLAYER_ZONE_DEPTH + NEUTRAL_ZONE_DEPTH;
-      playerMaxZ = gridMaxZ; // TOTAL_DEPTH
-    }
-  }
-
-  // Definiere die Eckpunkte der Zone, wenn bekannt
-  const points = useMemo(() => {
-    if (playerMinZ === null || playerMaxZ === null) return [];
-    // Eckpunkte definieren (im Uhrzeigersinn)
-    const p1 = new THREE.Vector3(gridMinX, 0, playerMinZ);
-    const p2 = new THREE.Vector3(gridMaxX, 0, playerMinZ);
-    const p3 = new THREE.Vector3(gridMaxX, 0, playerMaxZ);
-    const p4 = new THREE.Vector3(gridMinX, 0, playerMaxZ);
-    // Liniensegmente: [p1, p2], [p2, p3], [p3, p4], [p4, p1]
-    return [p1, p2, p2, p3, p3, p4, p4, p1];
-  }, [gridMinX, gridMaxX, playerMinZ, playerMaxZ]);
-
-  if (points.length === 0) return null; // Nichts rendern, wenn Zone unbekannt
-
-  // BufferGeometry für die Linien
-  const lineGeometry = useMemo(() => new THREE.BufferGeometry().setFromPoints(points), [points]);
-
-  // Leicht erhöht, um über dem Grid/Plane zu schweben
-  const yOffset = 0.01;
-
-  return (
-    <lineSegments geometry={lineGeometry} position={[0, yOffset, 0]}>
-      <lineBasicMaterial color="green" linewidth={2} />
-    </lineSegments>
-  );
 };
 
 // Hilfskomponente zur Anpassung der Canvas-Größe
@@ -288,19 +187,30 @@ const formatTime = (seconds: number): string => {
 
 // --- Projectile Mesh Component ---
 const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = ({ projectile }) => {
-    const meshRef = useRef<THREE.Mesh>(null!); 
+    const meshRef = useRef<THREE.Group>(null!); // Ref auf Group ändern
     // Ähnliche Interpolation wie bei Figuren
     const interpolatedPosition = useRef(new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z));
     const targetPosition = useMemo(() => new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z), [
         projectile.currentPos.x, projectile.currentPos.z
     ]);
 
+     // --- Sprite Loading ---
+    // TODO: Dynamischen Pfad basierend auf projectile.unitTypeId verwenden?
+    const spriteTexture = useTexture('/sprites/projectile.png');
+    // Ladefehler abfangen und Standardwerte verwenden
+    const aspectWidth = spriteTexture?.image?.width ?? 1;
+    const aspectHeight = spriteTexture?.image?.height ?? 1;
+    const spriteAspect = aspectWidth / aspectHeight;
+
+    const spriteHeight = 0.3; // Feste Größe für Projektile?
+    const spriteWidth = spriteHeight * spriteAspect;
+    const yOffset = spriteHeight / 2; // Höhe anpassen
+
     useFrame((state, delta) => {
-         // Einfachere Interpolation für Projektile (oder gar keine?)
-         // Da sie sich geradlinig bewegen, könnten wir auch die Server-Position nehmen.
-         // Testweise: Direkte Position vom Server
-         // interpolatedPosition.current.lerp(targetPosition, 0.2); 
-        interpolatedPosition.current.copy(targetPosition); // Direkt setzen
+         // Höhe in Zielposition berücksichtigen
+        targetPosition.set(projectile.currentPos.x, yOffset, projectile.currentPos.z);
+        // Interpolation hinzufügen, um die Bewegung zu glätten
+        interpolatedPosition.current.lerp(targetPosition, 0.3); // Faktor ggf. anpassen
 
         if (meshRef.current) {
             meshRef.current.position.copy(interpolatedPosition.current);
@@ -308,13 +218,19 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = ({ projectile 
     });
 
     return (
-        <Sphere 
-            ref={meshRef}
-            args={[0.15, 8, 8]}
-            position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}
-        >
-            <meshBasicMaterial color="orange" />
-        </Sphere>
+        // Group wird positioniert
+        <group ref={meshRef} position={[interpolatedPosition.current.x, yOffset, interpolatedPosition.current.z]}>
+             <Billboard>
+                <Plane args={[spriteWidth, spriteHeight]}>
+                     <meshBasicMaterial 
+                        map={spriteTexture} 
+                        transparent={true} 
+                        side={THREE.DoubleSide} 
+                        alphaTest={0.1} 
+                    />
+                </Plane>
+            </Billboard>
+        </group>
     );
 };
 
@@ -323,7 +239,6 @@ const GameScreen: React.FC = () => {
   const { gameState, setGameState } = useGameStore();
   const [isUnlocking, setIsUnlocking] = useState<string | null>(null);
   const [selectedUnitForPlacement, setSelectedUnitForPlacement] = useState<Unit | null>(null);
-  const [placementPreviewPosition, setPlacementPreviewPosition] = useState<{ x: number, z: number } | null>(null);
   const battlefieldContainerRef = useRef<HTMLDivElement>(null);
   const gameScreenWrapperRef = useRef<HTMLDivElement>(null);
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null); // State für Countdown
@@ -408,74 +323,6 @@ const GameScreen: React.FC = () => {
     setSelectedUnitForPlacement(unit);
   };
 
-  // Handler für Mausbewegung auf dem Grid
-  const handleGridPointerMove = (event: any /* ThreeEvent<PointerEvent> */) => {
-    if (!selectedUnitForPlacement) {
-        if (placementPreviewPosition !== null) {
-            // console.log('[handleGridPointerMove] Resetting preview (no unit selected)');
-            setPlacementPreviewPosition(null);
-        }
-        return;
-    }
-    const point = event.point;
-    if (point) {
-        const previewX = Math.round(point.x);
-        const previewZ = Math.round(point.z);
-        if (!placementPreviewPosition || placementPreviewPosition.x !== previewX || placementPreviewPosition.z !== previewZ) {
-             console.log(`[handleGridPointerMove] Setting preview position: { x: ${previewX}, z: ${previewZ} }`);
-             setPlacementPreviewPosition({ x: previewX, z: previewZ });
-        }
-    } else {
-        if (placementPreviewPosition !== null) {
-             console.log('[handleGridPointerMove] Resetting preview (pointer left grid)');
-             setPlacementPreviewPosition(null);
-        }
-    }
-  };
-
-  // Handler für das Verlassen des Grids mit dem Mauszeiger
-  const handleGridPointerOut = (event: any /* ThreeEvent<PointerEvent> */) => {
-      if (placementPreviewPosition !== null) {
-         console.log('[handleGridPointerOut] Resetting preview');
-         setPlacementPreviewPosition(null);
-      }
-  };
-
-  // Handler für Klick auf das 3D-Grid
-  const handleGridClick = (event: any /* ThreeEvent<MouseEvent> */) => {
-    console.log('[handleGridClick] Click detected.'); // Log Klick
-    if (!selectedUnitForPlacement || !gameState || !selfPlayer) {
-        console.log('[handleGridClick] Aborted (no unit/game/player).');
-        return;
-    }
-    event.stopPropagation();
-    const clickPoint = event.point;
-    // Vorsicht: clickPoint kann null sein, wenn Klick knapp daneben geht?
-    if (!clickPoint) {
-        console.log('[handleGridClick] Aborted (no clickPoint).');
-        return;
-    }
-    const gridX = Math.round(clickPoint.x);
-    const gridZ = Math.round(clickPoint.z);
-    
-    console.log(`[handleGridClick] Calculated grid coords: (${gridX}, ${gridZ})`);
-    setPlacementPreviewPosition(null); // Reset preview
-
-    const placementData = {
-        gameId: gameState.gameId,
-        unitId: selectedUnitForPlacement.id,
-        position: { x: gridX, z: gridZ }, 
-    };
-    console.log("[handleGridClick] Emitting 'game:place-unit' with data:", placementData);
-    socket.emit('game:place-unit', placementData, (response: any) => {
-        console.log('[handleGridClick] Server response:', response); // Log Server-Antwort
-        if (!response?.success) {
-            alert(`Fehler beim Platzieren: ${response?.message || 'Unbekannter Fehler'}`);
-        }
-        setSelectedUnitForPlacement(null);
-    });
-  };
-
   // NEU: Handler für "Kampf starten" Button
   const handleForceStartCombat = () => {
       if (!gameState || !playerId || gameState.hostId !== playerId || gameState.phase !== 'Preparation') {
@@ -510,40 +357,41 @@ const GameScreen: React.FC = () => {
   return (
     <div ref={gameScreenWrapperRef} className="game-screen-wrapper">
       <div ref={battlefieldContainerRef} className="battlefield-container">
-        <Canvas camera={{ position: [0, 50, 70], fov: 50 }}>
+        <Canvas camera={{ position: [70, 50, 0], fov: 50 }}>
           <Suspense fallback={null}> 
             <CanvasUpdater containerRef={battlefieldContainerRef} /> 
             <ambientLight intensity={0.6} />
             <directionalLight position={[10, 20, 5]} intensity={0.8} />
 
             <Plane
-              args={[100, 100]}
+              args={[50, 50]}
               rotation={[-Math.PI / 2, 0, 0]}
-              position={[0, -0.01, 0]}
-              onClick={handleGridClick}
-              onPointerMove={handleGridPointerMove}
-              onPointerOut={handleGridPointerOut}
+              position={[0, -0.01, 25]}
             >
               <meshStandardMaterial color="#cccccc" side={THREE.DoubleSide} />
             </Plane>
            
-            <OrbitControls />
+            <OrbitControls enableRotate={false} /> {/* Rotation deaktiviert */}
 
-            {gameState && gameState.phase === 'Preparation' && playerId !== null &&
-                <PlacementZoneHighlight gameState={gameState} playerId={playerId} />
-            }
+            {/* NEU: Platziersystem rendern */}
+            <PlacementSystem 
+                gameState={gameState}
+                playerId={playerId}
+                selfPlayer={selfPlayer}
+                selectedUnitForPlacement={selectedUnitForPlacement}
+                setSelectedUnitForPlacement={setSelectedUnitForPlacement}
+            />
            
+            {/* Platziere Einheiten */}
             {allPlacedUnits.map(unit => (
                 <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} />
             ))}
 
-            {selectedUnitForPlacement && placementPreviewPosition && 
-                <PlacementPreviewMesh unit={selectedUnitForPlacement} position={placementPreviewPosition} />
-            }
-
+            {/* Aktive Projektile */}
             {activeProjectiles.map(projectile => (
                 <ProjectileMesh key={projectile.projectileId} projectile={projectile} />
             ))}
+
           </Suspense>
         </Canvas>
       </div>

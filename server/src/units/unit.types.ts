@@ -29,7 +29,7 @@ export const placeholderUnits: Unit[] = [
     id: 'human_infantry',
     name: 'Infantry Squad',
     faction: 'Human',
-    width: 2,
+    width: 5,
     height: 2,
     squadSize: 10,
     damage: 12,
