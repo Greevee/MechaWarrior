@@ -222,13 +222,9 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
             unitId: selectedUnitForPlacement.id,
             position: { x: placementPreviewPosition.x, z: placementPreviewPosition.z },
         };
-        console.log("[PlacementSystem:Click] Emitting 'game:place-unit'", placementData);
-        socket.emit('game:place-unit', placementData, (response: any) => {
-            if (!response?.success) {
-                alert(`Placement Error: ${response?.message || 'Unknown error'}`);
-            }
-            setSelectedUnitForPlacement(null); // Clear selection after attempt
-        });
+        // Emitiere das Platzierungs-Event
+        socket.emit('game:place-unit', placementData);
+        setSelectedUnitForPlacement(null); // Clear selection after attempt
         setPlacementPreviewPosition(null); // Reset preview
     };
 

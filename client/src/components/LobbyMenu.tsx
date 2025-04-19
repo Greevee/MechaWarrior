@@ -19,12 +19,11 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
 
     // Listener für Lobby-Updates
     const handleLobbyUpdate = (updatedLobby: LobbyData) => {
-      console.log('Lobby-Update empfangen:', updatedLobby);
-      if(updatedLobby.id === currentLobbyId) {
-          setLobbyDetails(updatedLobby);
-          // Eigenen Bereitschaftsstatus aktualisieren (falls geändert)
-          const self = updatedLobby.players.find((p: LobbyPlayer) => p.id === playerId);
-          if (self) setIsReady(self.isReady);
+      if (updatedLobby.id === currentLobbyId) {
+        setLobbyDetails(updatedLobby);
+        // Eigenen Bereitschaftsstatus aktualisieren (falls geändert)
+        const self = updatedLobby.players.find((p: LobbyPlayer) => p.id === playerId);
+        if (self) setIsReady(self.isReady);
       }
     };
 
@@ -32,18 +31,9 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
     socket.on('lobby:update', handleLobbyUpdate);
 
     // Fordere initiale Lobby-Details an (falls nicht schon durch Update erhalten)
-    console.log(`Fordere Details für Lobby ${currentLobbyId} an...`);
-    socket.emit('lobby:get-details', currentLobbyId, (response: any) => {
-      if (response?.success && response?.lobby) {
-        setLobbyDetails(response.lobby);
-         const self = response.lobby.players.find((p: LobbyPlayer) => p.id === playerId);
-         if (self) setIsReady(self.isReady);
-      } else {
-        console.error('Konnte Lobby-Details nicht laden:', response?.message);
-        // Lobby existiert nicht mehr? Zurück zum Browser
-        setCurrentLobbyId(null);
-      }
-    });
+    if (currentLobbyId) {
+      socket.emit('lobby:get-details', currentLobbyId);
+    }
 
     // Aufräumfunktion
     return () => {
@@ -53,16 +43,8 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
 
   const handleLeaveLobby = () => {
     if (currentLobbyId) {
-      console.log(`Verlasse Lobby ${currentLobbyId}...`);
-      socket.emit('lobby:leave', currentLobbyId, (response: any) => {
-        if (response?.success) {
-          setCurrentLobbyId(null); // Setzt Zustand zurück -> wechselt zur LobbyBrowser Ansicht
-          setLobbyDetails(null);
-          setIsReady(false);
-          setSelectedFaction('');
-        } else {
-          alert(response?.message || 'Konnte Lobby nicht verlassen.');
-        }
+      socket.emit('lobby:leave', () => {
+        setCurrentLobbyId(null); // Zurück zur Lobby-Liste
       });
     }
   };
@@ -79,9 +61,7 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
   const handleReadyToggle = () => {
       if (currentLobbyId) {
           const newReadyState = !isReady;
-          console.log(`Setze Bereitschaftsstatus auf ${newReadyState}`);
-          socket.emit('lobby:set-ready', { lobbyId: currentLobbyId, isReady: newReadyState });
-          // Der Server sollte mit lobby:update antworten, was den lokalen State aktualisiert
+          socket.emit('lobby:set-ready', newReadyState);
       }
   }
 
@@ -89,11 +69,9 @@ const LobbyMenu: React.FC<LobbyMenuProps> = () => {
     if (!currentLobbyId || !isHost) return;
 
     setIsStartingGame(true);
-    console.log(`Sende 'lobby:start-game' für Lobby ${currentLobbyId}`);
-    socket.emit('lobby:start-game', currentLobbyId, (response: any) => {
-      console.log('Antwort vom Server (lobby:start-game):', response);
-      if (!response?.success) {
-        alert(response?.message || 'Spiel konnte nicht gestartet werden.');
+    socket.emit('lobby:start-game', currentLobbyId, (response: { success: boolean; message?: string }) => {
+      if (!response.success) {
+        alert(`Spiel konnte nicht gestartet werden: ${response.message}`);
       }
       // Wenn erfolgreich, wird der 'game:start' Event empfangen,
       // der dann den Wechsel zur Spielansicht auslöst (nächster Schritt).

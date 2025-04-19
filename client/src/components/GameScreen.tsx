@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html } from '@react-three/drei';
+import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats } from '@react-three/drei';
 import * as THREE from 'three';
-import { PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState } from '../types/game.types';
+import { PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState, GamePhase } from '../types/game.types';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
 import PlacementSystem from './PlacementSystem.tsx';
@@ -34,7 +34,7 @@ const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> =
 });
 
 // --- Figure Mesh Component --- 
-const FigureMesh: React.FC<{ figureData: FigureState }> = React.memo(({ figureData }) => {
+const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = React.memo(({ figureData, gamePhase }) => {
     const meshRef = useRef<THREE.Group>(null!); 
     const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z));
     const targetPosition = useMemo(() => new THREE.Vector3(figureData.position.x, 0, figureData.position.z), [
@@ -97,21 +97,28 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = React.memo(({ figureDa
         lastPosition.current.copy(interpolatedPosition.current);
 
         const moveThreshold = 0.001; // Kleiner Schwellenwert
+        const centerZ = 25; // Mittellinie
 
+        // Priorität 1: Im Kampf (attacking) immer zum Gegner (basierend auf Z)
         if (figureData.behavior === 'attacking') {
-            // Im Kampf: Feste Ausrichtung basierend auf Z-Position relativ zur Mitte (Annahme: Mitte bei Z=25)
-            const centerZ = 25;
             if (figureData.position.z < centerZ) {
-                facingScaleX.current = 1; // Unterhalb der Mitte -> schaue nach +Z (angenommen Skala 1)
+                facingScaleX.current = 1; 
             } else {
-                facingScaleX.current = -1; // Oberhalb der Mitte -> schaue nach -Z (angenommen Skala -1)
+                facingScaleX.current = -1;
             }
+        // Priorität 2: In Vorbereitung (Preparation) und untätig (idle) immer zum Gegner (basierend auf Z)
+        } else if (gamePhase === 'Preparation' && figureData.behavior === 'idle') {
+             if (figureData.position.z < centerZ) {
+                facingScaleX.current = 1; 
+            } else {
+                facingScaleX.current = -1;
+            }
+        // Priorität 3: Ansonsten (moving oder idle außerhalb von Preparation) basierend auf Bewegung
         } else {
-            // Außerhalb des Kampfes: Ausrichtung basierend auf Bewegungsrichtung (Z-Achse)
             if (movementDirection.z < -moveThreshold) {
-                facingScaleX.current = -1; // Nach -Z bewegen -> spiegeln (Skala -1)
+                facingScaleX.current = -1; // Nach -Z bewegen
             } else if (movementDirection.z > moveThreshold) {
-                facingScaleX.current = 1; // Nach +Z bewegen -> normal (Skala 1)
+                facingScaleX.current = 1; // Nach +Z bewegen
             }
             // Bei sehr kleiner Bewegung: Richtung beibehalten
         }
@@ -190,7 +197,7 @@ const FigurePlaceholderFallback: React.FC<{ figureData: FigureState }> = ({ figu
 
 // --- Placed Unit Mesh (rendert jetzt FigureMesh-Komponenten) ---
 // --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary) ---
-const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit }> = React.memo(({ placedUnit }) => {
+const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }> = React.memo(({ placedUnit, gamePhase }) => {
     return (
         <group userData={{ unitInstanceId: placedUnit.instanceId }}> 
             {placedUnit.figures.map((figure: FigureState) => {
@@ -217,6 +224,7 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit }> = React.memo(({ place
                         }>
                             <FigureMesh 
                                 figureData={figure}
+                                gamePhase={gamePhase}
                             />
                         </Suspense>
                     </ErrorBoundary>
@@ -243,7 +251,7 @@ const CanvasUpdater: React.FC<{ containerRef: React.RefObject<HTMLDivElement | n
     const heightDiff = Math.abs(size.height - height);
 
     if (width > 0 && height > 0 && (widthDiff > 1 || heightDiff > 1)) { // Nur bei > 1px Unterschied ändern
-      console.log(`Resizing Canvas from ${size.width}x${size.height} to ${width}x${height}`);
+      // console.log(`Resizing Canvas from ${size.width}x${size.height} to ${width}x${height}`); // Entfernt
       // Renderer-Größe aktualisieren
       gl.setSize(width, height);
       
@@ -280,7 +288,7 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = React.memo(({ 
     const getProjectileTexturePath = (unitTypeId: string): string => {
         // Annahme: /assets/projectiles/{unitTypeId}_projectile.png
         // TODO: Bessere Fehlerbehandlung / Fallback
-        console.log(`Generiere Projektil-Pfad für useTexture: /assets/projectiles/${unitTypeId}_projectile.png`);
+        // console.log(`Generiere Projektil-Pfad für useTexture: /assets/projectiles/${unitTypeId}_projectile.png`); // Entfernt
         return `/assets/projectiles/${unitTypeId}_projectile.png`;
     };
 
@@ -373,6 +381,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
   return (
     <>
+        {/* FPS Anzeige */} 
+        <Stats /> 
+
         {/* GameScreen rendert jetzt nur noch den Inhalt der Canvas */}
         {/* Die äußeren Container und die Canvas selbst sind in GameLoader */} 
 
@@ -409,7 +420,11 @@ const GameScreen: React.FC<GameScreenProps> = ({
        
         {/* Platziere Einheiten */}
         {allPlacedUnits.map(unit => (
-            <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} />
+            <PlacedUnitMesh 
+                key={unit.instanceId} 
+                placedUnit={unit} 
+                gamePhase={gameState.phase}
+            />
         ))}
 
         {/* Aktive Projektile */}

@@ -18,34 +18,20 @@ const LobbyBrowser: React.FC<LobbyBrowserProps> = () => {
 
   useEffect(() => {
     // Listener für die Lobby-Liste
-    const handleLobbyList = (lobbyList: LobbyData[]) => {
-      console.log('Lobby-Liste empfangen:', lobbyList);
+    socket.on('lobby:list', (lobbyList: LobbyData[]) => {
       setLobbies(lobbyList);
-    };
-
-    // Listener registrieren
-    socket.on('lobby:list', handleLobbyList);
-    
-    // Initial die Liste anfordern (könnte auch schon beim Connect passiert sein)
-    // Sicherstellen, dass wir die Liste haben, falls die Komponente später gemountet wird
-    // oder der erste 'connect' Event verpasst wurde.
-    // socket.emit('lobby:get-list'); // Optional, wenn wir einen dedizierten Handler dafür hätten
+    });
     
     // Aufräumfunktion: Listener entfernen
     return () => {
-      socket.off('lobby:list', handleLobbyList);
+      socket.off('lobby:list');
     };
   }, []); // Leeres Abhängigkeitsarray, damit der Effekt nur beim Mount/Unmount läuft
 
   const handleCreateLobby = () => {
-    console.log("Sende 'lobby:create' Event an den Server...");
-    socket.emit('lobby:create', (response: any) => {
-      console.log('Antwort vom Server (lobby:create):', response);
-      if (response?.success && response?.lobbyId) {
-        // Lobby erstellt, setze die ID im Zustand
+    socket.emit('lobby:create', (response: { success: boolean; lobbyId?: string; message?: string }) => {
+      if (response.success && response.lobbyId) {
         setCurrentLobbyId(response.lobbyId);
-        // Optional: Kein Alert mehr nötig, da die Ansicht wechselt
-        // alert(`Lobby erstellt! ID: ${response.lobbyId}`);
       } else {
         alert(response?.message || 'Lobby konnte nicht erstellt werden.');
       }
@@ -54,11 +40,9 @@ const LobbyBrowser: React.FC<LobbyBrowserProps> = () => {
 
   const handleJoinLobby = (lobbyId: string) => {
     setJoiningLobbyId(lobbyId); // Zeige Ladezustand für diesen Button
-    console.log(`Versuche Lobby ${lobbyId} beizutreten...`);
-    socket.emit('lobby:join', lobbyId, (response: any) => {
-      console.log('Antwort vom Server (lobby:join):', response);
-      if (response?.success && response?.lobbyId) {
-        setCurrentLobbyId(response.lobbyId); // Setze Lobby-ID im Store -> Ansicht wechselt
+    socket.emit('lobby:join', lobbyId, (response: { success: boolean; message?: string }) => {
+      if (response.success) {
+        setCurrentLobbyId(lobbyId);
       } else {
         alert(response?.message || 'Konnte Lobby nicht beitreten.');
       }
