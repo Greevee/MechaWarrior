@@ -34,7 +34,7 @@ const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> =
 });
 
 // --- Figure Mesh Component --- 
-const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = React.memo(({ figureData, isOpponent }) => {
+const FigureMesh: React.FC<{ figureData: FigureState }> = React.memo(({ figureData }) => {
     const meshRef = useRef<THREE.Group>(null!); 
     const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z));
     const targetPosition = useMemo(() => new THREE.Vector3(figureData.position.x, 0, figureData.position.z), [
@@ -74,14 +74,13 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = R
     const spriteHeight = 1.0 * modelScale; // Basis-Höhe, skaliert mit modelScale
     const spriteWidth = spriteHeight * spriteAspect;
 
-    // Effekt zum Spiegeln der Textur für den Gegner
+    // Effekt zum Setzen des Farbraums der Textur
     useEffect(() => {
         if (spriteTexture) {
-            spriteTexture.wrapS = THREE.RepeatWrapping;
-            spriteTexture.repeat.x = isOpponent ? -1 : 1;
+            spriteTexture.colorSpace = THREE.SRGBColorSpace; // Explizit setzen
             spriteTexture.needsUpdate = true;
         }
-    }, [spriteTexture, isOpponent]);
+    }, [spriteTexture]);
 
     // Einfacher Y-Offset für Sprites (halbe Höhe)
     useEffect(() => {
@@ -118,6 +117,7 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = R
                  {/* Original Sprite-Plane */}
                  <Plane args={[spriteWidth, spriteHeight]}>
                       <meshBasicMaterial
+                         color="white" // Explizit auf Weiß setzen
                          map={spriteTexture} // Verwende die dynamisch geladene Textur
                          transparent={true}
                          side={THREE.DoubleSide} 
@@ -169,11 +169,10 @@ const FigurePlaceholderFallback: React.FC<{ figureData: FigureState }> = ({ figu
 
 // --- Placed Unit Mesh (rendert jetzt FigureMesh-Komponenten) ---
 // --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary) ---
-const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, hostId: number | undefined }> = React.memo(({ placedUnit, hostId }) => {
+const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit }> = React.memo(({ placedUnit }) => {
     return (
         <group userData={{ unitInstanceId: placedUnit.instanceId }}> 
             {placedUnit.figures.map((figure: FigureState) => {
-                const isOpponentFigure = hostId !== undefined && figure.playerId !== hostId;
                 // Jede Figur wird von einer ErrorBoundary umschlossen.
                 return (
                     <ErrorBoundary 
@@ -196,8 +195,7 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, hostId: number | undefi
                             </mesh>
                         }>
                             <FigureMesh 
-                                figureData={figure} 
-                                isOpponent={isOpponentFigure}
+                                figureData={figure}
                             />
                         </Suspense>
                     </ErrorBoundary>
@@ -248,7 +246,7 @@ const formatTime = (seconds: number): string => {
 };
 
 // --- Projectile Mesh Component ---
-const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolean }> = React.memo(({ projectile, isOpponent }) => {
+const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = React.memo(({ projectile }) => {
     const meshRef = useRef<THREE.Group>(null!); 
     // Ähnliche Interpolation wie bei Figuren
     const interpolatedPosition = useRef(new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z));
@@ -282,14 +280,13 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolea
     const spriteWidth = spriteHeight * spriteAspect;
     const yOffset = spriteHeight / 2; // Höhe anpassen
 
-    // Effekt zum Spiegeln der Textur für den Gegner
+    // Effekt zum Setzen des Farbraums der Textur
     useEffect(() => {
         if (spriteTexture) {
-            spriteTexture.wrapS = THREE.RepeatWrapping;
-            spriteTexture.repeat.x = isOpponent ? -1 : 1;
+            spriteTexture.colorSpace = THREE.SRGBColorSpace; // Explizit setzen
             spriteTexture.needsUpdate = true;
         }
-    }, [spriteTexture, isOpponent]);
+    }, [spriteTexture]);
 
     useFrame((state, delta) => {
          // Höhe in Zielposition berücksichtigen
@@ -308,6 +305,7 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolea
              <Billboard>
                 <Plane args={[spriteWidth, spriteHeight]}>
                      <meshBasicMaterial 
+                        color="white" // Explizit auf Weiß setzen
                         map={spriteTexture} 
                         transparent={true} 
                         side={THREE.DoubleSide} 
@@ -390,12 +388,11 @@ const GameScreen: React.FC<GameScreenProps> = ({
        
         {/* Platziere Einheiten */}
         {allPlacedUnits.map(unit => (
-            <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} hostId={gameState?.hostId} />
+            <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} />
         ))}
 
         {/* Aktive Projektile */}
         {activeProjectiles.map(projectile => {
-            const isOpponentProjectile = gameState?.hostId !== undefined && projectile.playerId !== gameState.hostId;
             return (
                 // Umschließe mit ErrorBoundary und Suspense
                 <ErrorBoundary
@@ -417,8 +414,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
                     }>
                         <ProjectileMesh 
                             key={projectile.projectileId} 
-                            projectile={projectile} 
-                            isOpponent={isOpponentProjectile} 
+                            projectile={projectile}
                         />
                     </Suspense>
                 </ErrorBoundary>
