@@ -8,7 +8,7 @@ import { PlayerInGame, PlacedUnit, GameState as ClientGameState, FigureState, Pr
 import { socket } from '../socket';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
-import { PlacementSystem } from './PlacementSystem';
+import PlacementSystem from './PlacementSystem';
 
 // --- Health Bar Component ---
 const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = ({ currentHP, maxHP, scale }) => {
@@ -363,15 +363,23 @@ const GameScreen: React.FC = () => {
             <ambientLight intensity={0.6} />
             <directionalLight position={[10, 20, 5]} intensity={0.8} />
 
-            <Plane
-              args={[50, 50]}
-              rotation={[-Math.PI / 2, 0, 0]}
-              position={[0, -0.01, 25]}
-            >
+            {/* NEU: Achsen-Helfer (direkt nutzbar) */}
+            <axesHelper args={[10]} />
+
+            {/* Boden-Plane OHNE Platzierungs-Handler */}
+            <Plane args={[50, 50]} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 25]}>
               <meshStandardMaterial color="#cccccc" side={THREE.DoubleSide} />
             </Plane>
            
-            <OrbitControls enableRotate={false} /> {/* Rotation deaktiviert */}
+            <OrbitControls 
+              enableRotate={false} 
+              enablePan={true}     
+              mouseButtons={{
+                LEFT: THREE.MOUSE.PAN,   
+                MIDDLE: THREE.MOUSE.DOLLY, 
+              }}
+              screenSpacePanning={false}
+            /> 
 
             {/* NEU: Platziersystem rendern */}
             <PlacementSystem 
