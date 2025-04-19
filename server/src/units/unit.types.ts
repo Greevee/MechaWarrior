@@ -32,7 +32,7 @@ export const placeholderUnits: Unit[] = [
     faction: 'Human',
     width: 5,
     height: 2,
-    squadSize: 10,
+    squadSize: 15,
     damage: 12,
     attackSpeed: 1,
     splashRadius: 0,
@@ -44,11 +44,11 @@ export const placeholderUnits: Unit[] = [
     placementCost: 100,
     unlockCost: 0,
     icon: 'human_infantry_icon',
-    speed: 2,
-    bulletSpeed: 15,
-    collisionRange: 0.5,
+    speed: 1,
+    bulletSpeed: 30,
+    collisionRange: 0.2,
     modelScale: 0.5,
-    formation: '5x2'
+    formation: '5x3'
   },
   {
     id: 'human_sniper',

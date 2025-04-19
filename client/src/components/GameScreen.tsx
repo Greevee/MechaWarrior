@@ -4,11 +4,12 @@ import { useGameStore } from '../store/gameStore';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line } from '@react-three/drei';
 import * as THREE from 'three';
-import { PlayerInGame, PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState } from '../types/game.types';
+import { PlayerInGame, PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState } from '../types/game.types';
 import { socket } from '../socket';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
-import PlacementSystem from './PlacementSystem';
+import PlacementSystem from './PlacementSystem.tsx';
+import ErrorBoundary from './ErrorBoundary';
 
 // --- Health Bar Component ---
 const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = ({ currentHP, maxHP, scale }) => {
@@ -36,7 +37,7 @@ const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> =
 };
 
 // --- Figure Mesh Component --- 
-const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
+const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = ({ figureData, isOpponent }) => {
     const meshRef = useRef<THREE.Group>(null!); 
     const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z));
     const targetPosition = useMemo(() => new THREE.Vector3(figureData.position.x, 0, figureData.position.z), [
@@ -50,15 +51,45 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
     const maxHP = unitData?.hp ?? 100; 
 
     // --- Sprite Loading ---
-    // TODO: Dynamischen Pfad basierend auf figureData.unitTypeId verwenden
-    const spriteTexture = useTexture('/sprites/figure_placeholder.png'); 
-    // Ladefehler abfangen und Standardwerte verwenden
+    // Hilfsfunktion zum Erstellen des dynamischen Pfads
+    const getTexturePath = (unitTypeId: string, behavior: FigureBehaviorState): string => {
+        // Annahme: unitTypeId = Ordnername, behavior = Dateiname (ohne .png)
+        // TODO: Füge hier eine robuste Fehlerbehandlung hinzu! 
+        //       Was passiert, wenn der Ordner oder die Datei nicht existiert?
+        // ACHTUNG: unitTypeId muss exakt dem Ordnernamen entsprechen (Groß/Kleinschreibung)!
+        console.log(`Generiere Pfad für useTexture: /assets/units/${unitTypeId}/${behavior}.png`);
+        // Gib einfach den primären Pfad zurück. Das Laden/Fehlerbehandlung erfolgt durch useTexture/Suspense/ErrorBoundary.
+        return `/assets/units/${unitTypeId}/${behavior}.png`;
+    };
+
+    // Erstelle den Pfad basierend auf dem aktuellen Zustand
+    const texturePath = useMemo(() => {
+         return getTexturePath(figureData.unitTypeId, figureData.behavior);
+    }, [figureData.unitTypeId, figureData.behavior]); // Neu berechnen, wenn sich Typ oder Verhalten ändert
+
+    // Lade die dynamische Textur
+    // TODO: Error-Handling für useTexture hinzufügen, falls der Pfad ungültig ist.
+    // Wenn dieser Pfad ungültig ist, wirft useTexture einen Fehler, der von einer
+    // React Error Boundary oder dem Suspense Fallback (je nach Konfiguration)
+    // behandelt werden muss.
+    const spriteTexture = useTexture(texturePath); 
+    
+    // Ladefehler abfangen und Standardwerte verwenden (für Aspect Ratio)
     const aspectWidth = spriteTexture?.image?.width ?? 1;
     const aspectHeight = spriteTexture?.image?.height ?? 1;
     const spriteAspect = aspectWidth / aspectHeight;
 
     const spriteHeight = 1.0 * modelScale; // Basis-Höhe, skaliert mit modelScale
     const spriteWidth = spriteHeight * spriteAspect;
+
+    // Effekt zum Spiegeln der Textur für den Gegner
+    useEffect(() => {
+        if (spriteTexture) {
+            spriteTexture.wrapS = THREE.RepeatWrapping;
+            spriteTexture.repeat.x = isOpponent ? -1 : 1;
+            spriteTexture.needsUpdate = true;
+        }
+    }, [spriteTexture, isOpponent]);
 
     // Einfacher Y-Offset für Sprites (halbe Höhe)
     useEffect(() => {
@@ -102,26 +133,16 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
     return (
         // Group wird NUR noch positioniert
         <group ref={meshRef} key={figureData.figureId}>
-            <Billboard>
-                 {/* NEU: Schwarzer Umriss (dahinter und etwas größer) */}
-                 <Plane args={[spriteWidth + 0.08, spriteHeight + 0.08]}>
-                    <meshBasicMaterial
-                        color="black"
-                        transparent={true} // Muss transparent sein, um alphaTest/Map zu nutzen
-                        alphaMap={spriteTexture} // Benutze Alpha der Originaltextur
-                        alphaTest={0.1}        // Gleicher Alpha-Test
-                        side={THREE.DoubleSide}
-                    />
-                </Plane>
-                 {/* Original Sprite-Plane (leicht davor) */}
-                 <Plane args={[spriteWidth, spriteHeight]} position={[0, 0, 0.01]}>
-                     <meshBasicMaterial
-                        map={spriteTexture}
-                        transparent={true}
-                        side={THREE.DoubleSide} // Wichtig für Billboards
-                        alphaTest={0.1} // Verhindert teiltransparente Ränder
-                    />
-                </Plane>
+            <Billboard>             
+                 {/* Original Sprite-Plane */}
+                 <Plane args={[spriteWidth, spriteHeight]}>
+                      <meshBasicMaterial
+                         map={spriteTexture} // Verwende die dynamisch geladene Textur
+                         transparent={true}
+                         side={THREE.DoubleSide} 
+                         alphaTest={0.1} 
+                     />
+                 </Plane>
             </Billboard>
             {figureData.currentHP < maxHP && 
                  // Position der HealthBar relativ zur Sprite-Höhe anpassen
@@ -134,13 +155,73 @@ const FigureMesh: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
     );
 };
 
+// Eine Fallback-Komponente, die den Placeholder rendert
+// Wird benötigt, da wir Props an FigureMesh übergeben müssen.
+const FigurePlaceholderFallback: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
+    // Erstelle ein modifiziertes figureData-Objekt, das nur den Placeholder-Pfad verwendet
+    const placeholderFigureData = useMemo(() => ({
+        ...figureData,
+        // Überschreibe behavior temporär, um sicherzustellen, dass getTexturePath
+        // nicht erneut fehlschlägt, wenn wir es komplexer machen würden.
+        // Oder, noch einfacher: Wir laden die Textur direkt mit dem Placeholder-Pfad.
+        // (Wir bleiben bei der jetzigen Struktur, wo useTexture den Pfad nimmt)
+    }), [figureData]);
+
+    // Wir geben die originalen figureData weiter, aber der `useTexture` Aufruf 
+    // IN DER ERROR BOUNDARY wird den Fehler auslösen und DIESE Komponente rendern.
+    // Eine bessere Lösung wäre, einen spezifischen Prop für den Pfad zu haben.
+    // Für jetzt: Wir übergeben die originalen Daten und verlassen uns darauf,
+    // dass die ErrorBoundary *diese* Instanz rendert.
+    
+    // ALTERNATIVE (Sauberer): FigureMesh so umbauen, dass es einen texturePath-Prop akzeptiert.
+    // Dann könnte man hier aufrufen: <FigureMesh figureData={figureData} texturePath="/assets/units/placeholder/figure_placeholder.png" />
+    
+    // Aktueller Ansatz: Rendere FigureMesh normal, die Boundary fängt den Fehler.
+    // Der Fallback der Boundary ist dann ein einfacher Text oder eine andere Komponente.
+    // Wir müssen den Fallback also in der Nutzung der ErrorBoundary definieren.
+    
+    // Simplifizierter Fallback: Einfach nichts oder eine Box rendern?
+    // return <Box args={[1, 1, 1]} position={[figureData.position.x, 0.5, figureData.position.z]} />; 
+    // Vorerst geben wir NULL zurück, die Boundary zeigt die globale Meldung.
+    return null; 
+};
+
 // --- Placed Unit Mesh (rendert jetzt FigureMesh-Komponenten) ---
-const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit }> = ({ placedUnit }) => {
+// --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary) ---
+const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, hostId: number | undefined }> = ({ placedUnit, hostId }) => {
     return (
         <group userData={{ unitInstanceId: placedUnit.instanceId }}> 
-            {placedUnit.figures.map((figure: FigureState) => (
-                <FigureMesh key={figure.figureId} figureData={figure} />
-            ))}
+            {placedUnit.figures.map((figure: FigureState) => {
+                const isOpponentFigure = hostId !== undefined && figure.playerId !== hostId;
+                // Jede Figur wird von einer ErrorBoundary umschlossen.
+                return (
+                    <ErrorBoundary 
+                        key={figure.figureId} 
+                        fallback={
+                            // Definiere hier den Fallback, der angezeigt wird, wenn useTexture in FigureMesh fehlschlägt.
+                            // Wir rendern eine einfache Box an der Position der Figur als visuellen Hinweis.
+                            <mesh position={[figure.position.x, 0.5, figure.position.z]}>
+                                <boxGeometry args={[0.5, 0.5, 0.5]} />
+                                <meshStandardMaterial color="red" />
+                            </mesh>
+                        }
+                    >
+                        {/* Suspense für das Laden der Textur in FigureMesh */}
+                        <Suspense fallback={
+                            // Optional: Ein anderer Fallback *während* des Ladens (kann auch die rote Box sein)
+                            <mesh position={[figure.position.x, 0.5, figure.position.z]}>
+                                <boxGeometry args={[0.5, 0.5, 0.5]} />
+                                <meshStandardMaterial color="yellow" wireframe />
+                            </mesh>
+                        }>
+                            <FigureMesh 
+                                figureData={figure} 
+                                isOpponent={isOpponentFigure}
+                            />
+                        </Suspense>
+                    </ErrorBoundary>
+                );
+            })}
         </group>
     );
 };
@@ -186,7 +267,7 @@ const formatTime = (seconds: number): string => {
 };
 
 // --- Projectile Mesh Component ---
-const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = ({ projectile }) => {
+const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolean }> = ({ projectile, isOpponent }) => {
     const meshRef = useRef<THREE.Group>(null!); // Ref auf Group ändern
     // Ähnliche Interpolation wie bei Figuren
     const interpolatedPosition = useRef(new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z));
@@ -205,6 +286,15 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = ({ projectile 
     const spriteHeight = 0.3; // Feste Größe für Projektile?
     const spriteWidth = spriteHeight * spriteAspect;
     const yOffset = spriteHeight / 2; // Höhe anpassen
+
+    // Effekt zum Spiegeln der Textur für den Gegner
+    useEffect(() => {
+        if (spriteTexture) {
+            spriteTexture.wrapS = THREE.RepeatWrapping;
+            spriteTexture.repeat.x = isOpponent ? -1 : 1;
+            spriteTexture.needsUpdate = true;
+        }
+    }, [spriteTexture, isOpponent]);
 
     useFrame((state, delta) => {
          // Höhe in Zielposition berücksichtigen
@@ -385,20 +475,27 @@ const GameScreen: React.FC = () => {
             <PlacementSystem 
                 gameState={gameState}
                 playerId={playerId}
-                selfPlayer={selfPlayer}
+                selfPlayer={selfPlayer ?? null}
                 selectedUnitForPlacement={selectedUnitForPlacement}
                 setSelectedUnitForPlacement={setSelectedUnitForPlacement}
             />
            
             {/* Platziere Einheiten */}
             {allPlacedUnits.map(unit => (
-                <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} />
+                <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} hostId={gameState?.hostId} />
             ))}
 
             {/* Aktive Projektile */}
-            {activeProjectiles.map(projectile => (
-                <ProjectileMesh key={projectile.projectileId} projectile={projectile} />
-            ))}
+            {activeProjectiles.map(projectile => {
+                const isOpponentProjectile = gameState?.hostId !== undefined && projectile.playerId !== gameState.hostId;
+                return (
+                    <ProjectileMesh 
+                        key={projectile.projectileId} 
+                        projectile={projectile} 
+                        isOpponent={isOpponentProjectile}
+                    />
+                );
+            })}
 
           </Suspense>
         </Canvas>
