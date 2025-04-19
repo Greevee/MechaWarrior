@@ -459,7 +459,7 @@ const GameScreen: React.FC = () => {
   return (
     <div ref={gameScreenWrapperRef} className="game-screen-wrapper">
       <div ref={battlefieldContainerRef} className="battlefield-container">
-        <Canvas camera={{ position: [70, 50, 0], fov: 50 }}>
+        <Canvas camera={{ position: [-70, 50, 0], fov: 50 }}>
           <Suspense fallback={null}> 
             <CanvasUpdater containerRef={battlefieldContainerRef} /> 
             <ambientLight intensity={0.6} />

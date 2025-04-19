@@ -121,6 +121,30 @@ export const placeholderUnits: Unit[] = [
     collisionRange: 0.4,
     modelScale: 0.8,
     formation: '1x1'
+  },
+  {
+    id: 'human_small_tank',
+    name: 'Small Tank',
+    faction: 'Human',
+    width: 5,
+    height: 2,
+    squadSize: 5,
+    damage: 600,
+    attackSpeed: 0.3,
+    splashRadius: 0.2,
+    range: 12,
+    hp: 3000,
+    armor: 0.2,
+    damageReduction: 3,
+    shield: 0,
+    placementCost: 200,
+    unlockCost: 0,
+    icon: 'human_small_tank_icon',
+    speed: 1.5,
+    bulletSpeed: 20,
+    collisionRange: 0.5,
+    modelScale: 1.2,
+    formation: '1x5'
   }
 ];
 
