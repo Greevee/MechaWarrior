@@ -251,7 +251,7 @@ const CanvasUpdater: React.FC<{ containerRef: React.RefObject<HTMLDivElement | n
     const heightDiff = Math.abs(size.height - height);
 
     if (width > 0 && height > 0 && (widthDiff > 1 || heightDiff > 1)) { // Nur bei > 1px Unterschied ändern
-      // console.log(`Resizing Canvas from ${size.width}x${size.height} to ${width}x${height}`); // Entfernt
+      console.log(`Resizing Canvas from ${size.width}x${size.height} to ${width}x${height}`);
       // Renderer-Größe aktualisieren
       gl.setSize(width, height);
       
@@ -288,7 +288,7 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = React.memo(({ 
     const getProjectileTexturePath = (unitTypeId: string): string => {
         // Annahme: /assets/projectiles/{unitTypeId}_projectile.png
         // TODO: Bessere Fehlerbehandlung / Fallback
-        // console.log(`Generiere Projektil-Pfad für useTexture: /assets/projectiles/${unitTypeId}_projectile.png`); // Entfernt
+        console.log(`Generiere Projektil-Pfad für useTexture: /assets/projectiles/${unitTypeId}_projectile.png`);
         return `/assets/projectiles/${unitTypeId}_projectile.png`;
     };
 
@@ -394,10 +394,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
         {/* NEU: Achsen-Helfer (direkt nutzbar) */}
         <axesHelper args={[10]} />
 
-        {/* Boden-Plane OHNE Platzierungs-Handler */}
-        <Plane args={[50, 50]} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 25]}>
-          <meshStandardMaterial color="#cccccc" side={THREE.DoubleSide} />
-        </Plane>
+        {/* Boden-Plane mit neuer Textur */}
+        <GroundPlane />
        
         <OrbitControls 
           enableRotate={false} 
@@ -460,5 +458,32 @@ const GameScreen: React.FC<GameScreenProps> = ({
     </>
   );
 };
+
+// NEU: Eigene Komponente für die Boden-Plane, um Textur zu laden
+const GroundPlane = () => {
+  const groundTexture = useTexture('/assets/ground.png');
+
+  // Sicherstellen, dass die Textur korrekt konfiguriert ist
+  useEffect(() => {
+    if (groundTexture) {
+        groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+        groundTexture.repeat.set(10, 10); // Skalierung: Wiederholt sich doppelt so oft -> 1/4 Größe
+        groundTexture.rotation = Math.PI / 2; // Rotation um 90 Grad
+        groundTexture.anisotropy = 16; 
+        groundTexture.colorSpace = THREE.SRGBColorSpace;
+        groundTexture.needsUpdate = true;
+    }
+  }, [groundTexture]);
+
+  return (
+    <Plane args={[50, 50]} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 25]}>
+        <meshStandardMaterial 
+            map={groundTexture} // Textur anwenden
+            color="white" // Helligkeit: Stelle sicher, dass Material nicht abdunkelt
+            side={THREE.DoubleSide} 
+        />
+    </Plane>
+  );
+}
 
 export default GameScreen;
