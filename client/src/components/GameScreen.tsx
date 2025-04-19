@@ -53,11 +53,9 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = (
     // --- Sprite Loading ---
     // Hilfsfunktion zum Erstellen des dynamischen Pfads
     const getTexturePath = (unitTypeId: string, behavior: FigureBehaviorState): string => {
-        // Annahme: unitTypeId = Ordnername, behavior = Dateiname (ohne .png)
-        // TODO: Füge hier eine robuste Fehlerbehandlung hinzu! 
-        //       Was passiert, wenn der Ordner oder die Datei nicht existiert?
+        //       -> Fallback auf idle? Fallback auf default-Einheit? Error?
         // ACHTUNG: unitTypeId muss exakt dem Ordnernamen entsprechen (Groß/Kleinschreibung)!
-        console.log(`Generiere Pfad für useTexture: /assets/units/${unitTypeId}/${behavior}.png`);
+        // console.log(`Generiere Pfad für useTexture: /assets/units/${unitTypeId}/${behavior}.png`); // Auskommentiert für weniger Logs
         // Gib einfach den primären Pfad zurück. Das Laden/Fehlerbehandlung erfolgt durch useTexture/Suspense/ErrorBoundary.
         return `/assets/units/${unitTypeId}/${behavior}.png`;
     };
@@ -268,7 +266,7 @@ const formatTime = (seconds: number): string => {
 
 // --- Projectile Mesh Component ---
 const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolean }> = ({ projectile, isOpponent }) => {
-    const meshRef = useRef<THREE.Group>(null!); // Ref auf Group ändern
+    const meshRef = useRef<THREE.Group>(null!); 
     // Ähnliche Interpolation wie bei Figuren
     const interpolatedPosition = useRef(new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z));
     const targetPosition = useMemo(() => new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z), [
@@ -276,8 +274,22 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolea
     ]);
 
      // --- Sprite Loading ---
-    // TODO: Dynamischen Pfad basierend auf projectile.unitTypeId verwenden?
-    const spriteTexture = useTexture('/sprites/projectile.png');
+    // Erstelle den Pfad zur Projektil-Grafik dynamisch
+    const getProjectileTexturePath = (unitTypeId: string): string => {
+        // Annahme: /assets/projectiles/{unitTypeId}_projectile.png
+        // TODO: Bessere Fehlerbehandlung / Fallback
+        console.log(`Generiere Projektil-Pfad für useTexture: /assets/projectiles/${unitTypeId}_projectile.png`);
+        return `/assets/projectiles/${unitTypeId}_projectile.png`;
+    };
+
+    const texturePath = useMemo(() => {
+        return getProjectileTexturePath(projectile.unitTypeId);
+    }, [projectile.unitTypeId]);
+
+    // Lade die dynamische Textur
+    // Fehler werden durch Suspense/ErrorBoundary außen behandelt
+    const spriteTexture = useTexture(texturePath);
+
     // Ladefehler abfangen und Standardwerte verwenden
     const aspectWidth = spriteTexture?.image?.width ?? 1;
     const aspectHeight = spriteTexture?.image?.height ?? 1;
@@ -443,7 +455,7 @@ const GameScreen: React.FC = () => {
 
   const isHost = gameState && playerId !== null && gameState.hostId === playerId;
 
-  console.log('[GameScreen Render] Units:', allPlacedUnits.length, 'Projectiles:', activeProjectiles.length);
+  // console.log('[GameScreen Render] Units:', allPlacedUnits.length, 'Projectiles:', activeProjectiles.length); // Auskommentiert für weniger Logs
   return (
     <div ref={gameScreenWrapperRef} className="game-screen-wrapper">
       <div ref={battlefieldContainerRef} className="battlefield-container">
@@ -489,11 +501,31 @@ const GameScreen: React.FC = () => {
             {activeProjectiles.map(projectile => {
                 const isOpponentProjectile = gameState?.hostId !== undefined && projectile.playerId !== gameState.hostId;
                 return (
-                    <ProjectileMesh 
-                        key={projectile.projectileId} 
-                        projectile={projectile} 
-                        isOpponent={isOpponentProjectile}
-                    />
+                    // Umschließe mit ErrorBoundary und Suspense
+                    <ErrorBoundary
+                        key={`${projectile.projectileId}-boundary`}
+                        fallback={
+                            // Fallback für Ladefehler (z.B. rote Kugel)
+                            <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
+                                <sphereGeometry args={[0.1, 8, 8]} />
+                                <meshStandardMaterial color="red" />
+                            </mesh>
+                        }
+                    >
+                        <Suspense fallback={
+                            // Fallback während des Ladens (z.B. gelbe Kugel)
+                             <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
+                                <sphereGeometry args={[0.1, 8, 8]} />
+                                <meshStandardMaterial color="yellow" wireframe />
+                            </mesh>
+                        }>
+                            <ProjectileMesh 
+                                key={projectile.projectileId} 
+                                projectile={projectile} 
+                                isOpponent={isOpponentProjectile} 
+                            />
+                        </Suspense>
+                    </ErrorBoundary>
                 );
             })}
 
