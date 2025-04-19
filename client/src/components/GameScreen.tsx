@@ -1,18 +1,15 @@
 import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react';
-import { usePlayerStore } from '../store/playerStore';
-import { useGameStore } from '../store/gameStore';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line } from '@react-three/drei';
+import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html } from '@react-three/drei';
 import * as THREE from 'three';
-import { PlayerInGame, PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState } from '../types/game.types';
-import { socket } from '../socket';
+import { PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState } from '../types/game.types';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
 import PlacementSystem from './PlacementSystem.tsx';
 import ErrorBoundary from './ErrorBoundary';
 
 // --- Health Bar Component ---
-const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = ({ currentHP, maxHP, scale }) => {
+const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = React.memo(({ currentHP, maxHP, scale }) => {
     const healthRatio = Math.max(0, currentHP / maxHP);
     const barWidth = 1.0 * scale; // Basisbreite des Balkens, skaliert mit Modell
     const barHeight = 0.1 * scale; // Basishöhe des Balkens, skaliert mit Modell
@@ -34,10 +31,10 @@ const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> =
             </Plane>
         </Billboard>
     );
-};
+});
 
 // --- Figure Mesh Component --- 
-const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = ({ figureData, isOpponent }) => {
+const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = React.memo(({ figureData, isOpponent }) => {
     const meshRef = useRef<THREE.Group>(null!); 
     const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z));
     const targetPosition = useMemo(() => new THREE.Vector3(figureData.position.x, 0, figureData.position.z), [
@@ -53,9 +50,7 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = (
     // --- Sprite Loading ---
     // Hilfsfunktion zum Erstellen des dynamischen Pfads
     const getTexturePath = (unitTypeId: string, behavior: FigureBehaviorState): string => {
-        //       -> Fallback auf idle? Fallback auf default-Einheit? Error?
         // ACHTUNG: unitTypeId muss exakt dem Ordnernamen entsprechen (Groß/Kleinschreibung)!
-        // console.log(`Generiere Pfad für useTexture: /assets/units/${unitTypeId}/${behavior}.png`); // Auskommentiert für weniger Logs
         // Gib einfach den primären Pfad zurück. Das Laden/Fehlerbehandlung erfolgt durch useTexture/Suspense/ErrorBoundary.
         return `/assets/units/${unitTypeId}/${behavior}.png`;
     };
@@ -66,7 +61,6 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = (
     }, [figureData.unitTypeId, figureData.behavior]); // Neu berechnen, wenn sich Typ oder Verhalten ändert
 
     // Lade die dynamische Textur
-    // TODO: Error-Handling für useTexture hinzufügen, falls der Pfad ungültig ist.
     // Wenn dieser Pfad ungültig ist, wirft useTexture einen Fehler, der von einer
     // React Error Boundary oder dem Suspense Fallback (je nach Konfiguration)
     // behandelt werden muss.
@@ -117,17 +111,6 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = (
         }
     });
 
-    // Entferne GLTF-Lade-Logik
-    // const isSoldier = figureData.unitTypeId === 'human_infantry';
-    // const modelPath = '/models/soldier.glb'; 
-    // const gltf = isSoldier ? useGLTF(modelPath) : null;
-    // const scene = gltf?.scene;
-    // useEffect(() => { ... }, [scene, isSoldier, figureData.unitTypeId, modelScale]); // Entfernt
-
-    // Entferne bedingtes Rendern von Modell/Kugel
-    // let figureVisual;
-    // if (isSoldier && scene) { ... } else { ... } // Entfernt
-
     return (
         // Group wird NUR noch positioniert
         <group ref={meshRef} key={figureData.figureId}>
@@ -151,7 +134,7 @@ const FigureMesh: React.FC<{ figureData: FigureState, isOpponent: boolean }> = (
             }
         </group>
     );
-};
+});
 
 // Eine Fallback-Komponente, die den Placeholder rendert
 // Wird benötigt, da wir Props an FigureMesh übergeben müssen.
@@ -186,7 +169,7 @@ const FigurePlaceholderFallback: React.FC<{ figureData: FigureState }> = ({ figu
 
 // --- Placed Unit Mesh (rendert jetzt FigureMesh-Komponenten) ---
 // --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary) ---
-const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, hostId: number | undefined }> = ({ placedUnit, hostId }) => {
+const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, hostId: number | undefined }> = React.memo(({ placedUnit, hostId }) => {
     return (
         <group userData={{ unitInstanceId: placedUnit.instanceId }}> 
             {placedUnit.figures.map((figure: FigureState) => {
@@ -222,10 +205,10 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, hostId: number | undefi
             })}
         </group>
     );
-};
+});
 
 // Hilfskomponente zur Anpassung der Canvas-Größe
-const CanvasUpdater: React.FC<{ containerRef: React.RefObject<HTMLDivElement | null> }> = ({ containerRef }) => {
+const CanvasUpdater: React.FC<{ containerRef: React.RefObject<HTMLDivElement | null> }> = React.memo(({ containerRef }) => {
   const { gl, camera, size } = useThree();
 
   useFrame(() => {
@@ -255,7 +238,7 @@ const CanvasUpdater: React.FC<{ containerRef: React.RefObject<HTMLDivElement | n
   });
 
   return null; // Diese Komponente rendert nichts Sichtbares
-};
+});
 
 // Hilfsfunktion zur Formatierung der verbleibenden Zeit
 const formatTime = (seconds: number): string => {
@@ -265,7 +248,7 @@ const formatTime = (seconds: number): string => {
 };
 
 // --- Projectile Mesh Component ---
-const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolean }> = ({ projectile, isOpponent }) => {
+const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolean }> = React.memo(({ projectile, isOpponent }) => {
     const meshRef = useRef<THREE.Group>(null!); 
     // Ähnliche Interpolation wie bei Figuren
     const interpolatedPosition = useRef(new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z));
@@ -334,303 +317,115 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState, isOpponent: boolea
             </Billboard>
         </group>
     );
-};
+});
 
-const GameScreen: React.FC = () => {
-  const { playerId } = usePlayerStore();
-  const { gameState, setGameState } = useGameStore();
-  const [isUnlocking, setIsUnlocking] = useState<string | null>(null);
-  const [selectedUnitForPlacement, setSelectedUnitForPlacement] = useState<Unit | null>(null);
-  const battlefieldContainerRef = useRef<HTMLDivElement>(null);
-  const gameScreenWrapperRef = useRef<HTMLDivElement>(null);
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null); // State für Countdown
+// NEU: Definiere Props für GameScreen
+interface GameScreenProps {
+    gameState: ClientGameState;
+    playerId: number | null;
+    battlefieldContainerRef: React.RefObject<HTMLDivElement | null>;
+    // Props für Platzierung von GameLoader erhalten
+    selectedUnitForPlacement: Unit | null;
+    setSelectedUnitForPlacement: React.Dispatch<React.SetStateAction<Unit | null>>;
+}
 
-  useEffect(() => {
-    const handleGameStateUpdate = (updatedGameState: any) => {
-      console.log('Game state update empfangen:', updatedGameState);
-      setGameState(updatedGameState);
-    };
-    
-    socket.on('game:state-update', handleGameStateUpdate);
+const GameScreen: React.FC<GameScreenProps> = ({ 
+    gameState, 
+    playerId, 
+    battlefieldContainerRef,
+    selectedUnitForPlacement, // Prop empfangen
+    setSelectedUnitForPlacement, // Prop empfangen
+}) => {
+  // Zustand und Logik für UI-Elemente wurden nach GameLoader verschoben
+  // Wir benötigen hier nur noch die Logik, die *direkt* die 3D-Szene beeinflusst.
 
-    return () => {
-      socket.off('game:state-update', handleGameStateUpdate);
-    };
-  }, [setGameState]);
+  // selectedUnitForPlacement wird weiterhin benötigt für PlacementSystem
+  // Lokaler State entfernt, wird jetzt als Prop empfangen.
 
-  useEffect(() => {
-    const logSizes = () => {
-        const wrapper = gameScreenWrapperRef.current;
-        const container = battlefieldContainerRef.current;
-        if (wrapper) {
-            console.log(`Wrapper Size: ${wrapper.clientWidth}x${wrapper.clientHeight}`);
-        }
-        if (container) {
-            console.log(`Container Size (battlefield): ${container.clientWidth}x${container.clientHeight}`);
-        }
-    }
-    
-    logSizes(); // Beim Mounten loggen
-    
-    // Optional: Bei Fenster-Resize erneut loggen
-    window.addEventListener('resize', logSizes);
-    return () => window.removeEventListener('resize', logSizes);
-
-  }, []);
-
-  // Effekt für den Countdown-Timer
-  useEffect(() => {
-      if (gameState?.phase === 'Preparation' && gameState.preparationEndTime) {
-          const calculateRemaining = () => {
-              const remaining = Math.max(0, (gameState.preparationEndTime! - Date.now()) / 1000);
-              setTimeRemaining(remaining);
-              if (remaining === 0) {
-                  // Timer ist clientseitig abgelaufen (Server sollte Phase ändern)
-                  // Keine Aktion hier nötig, da Server die Phase umstellt.
-              }
-          };
-          
-          calculateRemaining(); // Sofort berechnen
-          const intervalId = setInterval(calculateRemaining, 1000); // Jede Sekunde aktualisieren
-          
-          return () => clearInterval(intervalId); // Interval beim Verlassen oder Phasenwechsel löschen
-      } else {
-          setTimeRemaining(null); // Timer zurücksetzen, wenn nicht in Vorbereitung
-      }
-  }, [gameState?.phase, gameState?.preparationEndTime]); // Abhängig von Phase und Endzeit
-
-  const handleUnlockUnit = (unitId: string) => {
-    if (!gameState) return;
-    setIsUnlocking(unitId);
-    console.log(`Sende 'game:unlock-unit' für Einheit ${unitId}`);
-    socket.emit('game:unlock-unit', { gameId: gameState.gameId, unitId }, (response: any) => {
-      if (!response?.success) {
-        alert(`Fehler beim Freischalten: ${response?.message || 'Unbekannter Fehler'}`);
-      }
-      setIsUnlocking(null);
-    });
-  };
-
-  const handleSelectUnitForPlacement = (unit: Unit) => {
-    if (!gameState || !selfPlayer) return;
-    if (!selfPlayer.unlockedUnits.includes(unit.id)) {
-      console.warn("Versuch, nicht freigeschaltete Einheit zum Platzieren auszuwählen.");
-      return;
-    }
-    if (selfPlayer.credits < unit.placementCost) {
-      console.warn("Nicht genug Credits zum Platzieren dieser Einheit.");
-      return;
-    }
-    console.log(`Einheit zum Platzieren ausgewählt: ${unit.name}`);
-    setSelectedUnitForPlacement(unit);
-  };
-
-  // NEU: Handler für "Kampf starten" Button
-  const handleForceStartCombat = () => {
-      if (!gameState || !playerId || gameState.hostId !== playerId || gameState.phase !== 'Preparation') {
-          console.warn('Versuch, Kampfstart außerhalb der erlaubten Bedingungen zu erzwingen.');
-          return;
-      }
-      console.log(`[${playerId}] Erzwinge Kampfstart für Spiel ${gameState.gameId}`);
-      socket.emit('game:force-start-combat', gameState.gameId, (response: any) => {
-          if (!response?.success) {
-              alert(`Fehler beim Starten des Kampfes: ${response?.message || 'Unbekannter Fehler'}`);
-          }
-          // Der GameState wird durch das 'game:state-update' Event aktualisiert
-      });
-  };
+  // Berechnungen, die *nur* für die 3D-Szene relevant sind:
+  const allPlacedUnits = useMemo(() => gameState?.players.flatMap(p => p.placedUnits) ?? [], [gameState?.players]);
+  const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
+  const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); // Wird für PlacementSystem benötigt
 
   if (!gameState) {
+    // Sollte nicht passieren, da GameLoader wartet
     return <div>Lade Spielzustand...</div>;
   }
 
-  const selfPlayer = gameState.players.find((p: PlayerInGame) => p.id === playerId);
-  const opponentPlayer = gameState.players.find((p: PlayerInGame) => p.id !== playerId);
-
-  const availableUnits = placeholderUnits.filter(unit => unit.faction === selfPlayer?.faction);
-
-  // Memoize die Listen, um unnötige Neuzuordnungen zu vermeiden
-  const allPlacedUnits = useMemo(() => gameState?.players.flatMap(p => p.placedUnits) ?? [], [gameState?.players]);
-  const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
-
-  const isHost = gameState && playerId !== null && gameState.hostId === playerId;
-
-  // console.log('[GameScreen Render] Units:', allPlacedUnits.length, 'Projectiles:', activeProjectiles.length); // Auskommentiert für weniger Logs
   return (
-    <div ref={gameScreenWrapperRef} className="game-screen-wrapper">
-      <div ref={battlefieldContainerRef} className="battlefield-container">
-        <Canvas camera={{ position: [-70, 50, 0], fov: 50 }}>
-          <Suspense fallback={null}> 
-            <CanvasUpdater containerRef={battlefieldContainerRef} /> 
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[10, 20, 5]} intensity={0.8} />
+    <>
+        {/* GameScreen rendert jetzt nur noch den Inhalt der Canvas */}
+        {/* Die äußeren Container und die Canvas selbst sind in GameLoader */} 
 
-            {/* NEU: Achsen-Helfer (direkt nutzbar) */}
-            <axesHelper args={[10]} />
+        <CanvasUpdater containerRef={battlefieldContainerRef} /> 
+        <ambientLight intensity={0.6} />
+        <directionalLight position={[10, 20, 5]} intensity={0.8} />
 
-            {/* Boden-Plane OHNE Platzierungs-Handler */}
-            <Plane args={[50, 50]} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 25]}>
-              <meshStandardMaterial color="#cccccc" side={THREE.DoubleSide} />
-            </Plane>
-           
-            <OrbitControls 
-              enableRotate={false} 
-              enablePan={true}     
-              mouseButtons={{
-                LEFT: THREE.MOUSE.PAN,   
-                MIDDLE: THREE.MOUSE.DOLLY, 
-              }}
-              screenSpacePanning={false}
-            /> 
+        {/* NEU: Achsen-Helfer (direkt nutzbar) */}
+        <axesHelper args={[10]} />
 
-            {/* NEU: Platziersystem rendern */}
-            <PlacementSystem 
-                gameState={gameState}
-                playerId={playerId}
-                selfPlayer={selfPlayer ?? null}
-                selectedUnitForPlacement={selectedUnitForPlacement}
-                setSelectedUnitForPlacement={setSelectedUnitForPlacement}
-            />
-           
-            {/* Platziere Einheiten */}
-            {allPlacedUnits.map(unit => (
-                <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} hostId={gameState?.hostId} />
-            ))}
+        {/* Boden-Plane OHNE Platzierungs-Handler */}
+        <Plane args={[50, 50]} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 25]}>
+          <meshStandardMaterial color="#cccccc" side={THREE.DoubleSide} />
+        </Plane>
+       
+        <OrbitControls 
+          enableRotate={false} 
+          enablePan={true}     
+          mouseButtons={{
+            LEFT: THREE.MOUSE.PAN,   
+            MIDDLE: THREE.MOUSE.DOLLY, 
+          }}
+          screenSpacePanning={false}
+        /> 
 
-            {/* Aktive Projektile */}
-            {activeProjectiles.map(projectile => {
-                const isOpponentProjectile = gameState?.hostId !== undefined && projectile.playerId !== gameState.hostId;
-                return (
-                    // Umschließe mit ErrorBoundary und Suspense
-                    <ErrorBoundary
-                        key={`${projectile.projectileId}-boundary`}
-                        fallback={
-                            // Fallback für Ladefehler (z.B. rote Kugel)
-                            <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
-                                <sphereGeometry args={[0.1, 8, 8]} />
-                                <meshStandardMaterial color="red" />
-                            </mesh>
-                        }
-                    >
-                        <Suspense fallback={
-                            // Fallback während des Ladens (z.B. gelbe Kugel)
-                             <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
-                                <sphereGeometry args={[0.1, 8, 8]} />
-                                <meshStandardMaterial color="yellow" wireframe />
-                            </mesh>
-                        }>
-                            <ProjectileMesh 
-                                key={projectile.projectileId} 
-                                projectile={projectile} 
-                                isOpponent={isOpponentProjectile} 
-                            />
-                        </Suspense>
-                    </ErrorBoundary>
-                );
-            })}
+        {/* NEU: Platziersystem rendern */}
+        <PlacementSystem 
+            gameState={gameState}
+            playerId={playerId}
+            selfPlayer={selfPlayer ?? null}
+            selectedUnitForPlacement={selectedUnitForPlacement}
+            setSelectedUnitForPlacement={setSelectedUnitForPlacement}
+        />
+       
+        {/* Platziere Einheiten */}
+        {allPlacedUnits.map(unit => (
+            <PlacedUnitMesh key={unit.instanceId} placedUnit={unit} hostId={gameState?.hostId} />
+        ))}
 
-          </Suspense>
-        </Canvas>
-      </div>
-
-      <div className="game-info player-info">
-        <h3>{selfPlayer?.username || 'Spieler'} (Du)</h3>
-        <p>HP: {selfPlayer?.baseHealth ?? '??'}</p>
-        <p>Credits: {selfPlayer?.credits ?? '??'}</p>
-      </div>
-      <div className="game-info opponent-info">
-        <h3>{opponentPlayer?.username || 'Gegner'}</h3>
-        <p>HP: {opponentPlayer?.baseHealth ?? '??'}</p>
-        <p>Credits: {opponentPlayer?.credits ?? '??'}</p>
-      </div>
-
-      <div className="game-controls unit-details">
-        {gameState?.phase === 'Preparation' && (
-            <div className='preparation-controls'>
-                <h4>Vorbereitung</h4>
-                {timeRemaining !== null && (
-                    <p>Verbleibende Zeit: <strong>{formatTime(timeRemaining)}</strong></p>
-                )}
-                {isHost && (
-                    <button onClick={handleForceStartCombat}>Kampf starten</button>
-                )}
-                <hr /> 
-            </div>
-        )}
-        
-        {selectedUnitForPlacement ? (
-            <div>
-                <h5>Einheit Details</h5>
-                <p>Platziere: {selectedUnitForPlacement.name}</p>
-                <p>Kosten: {selectedUnitForPlacement.placementCost} C</p>
-                <button onClick={() => setSelectedUnitForPlacement(null)}>Abbrechen</button>
-            </div>
-        ) : (
-            gameState?.phase !== 'Preparation' && <p>Kampf läuft...</p>
-        )}
-      </div>
-      <div className="game-controls unit-pool">
-        <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
-        <div className="unit-tiles-grid"> 
-          {availableUnits.map((unit: Unit) => {
-            const isUnlocked = selfPlayer?.unlockedUnits.includes(unit.id);
-            const canAffordUnlock = selfPlayer ? selfPlayer.credits >= unit.unlockCost : false;
-            const canAffordPlacement = selfPlayer ? selfPlayer.credits >= unit.placementCost : false;
-            const unlockingThis = isUnlocking === unit.id;
-            const isSelectedForPlacement = selectedUnitForPlacement?.id === unit.id;
-
-            // Bestimme, ob die Kachel überhaupt klickbar sein soll
-            const isDisabled = unlockingThis || // Wenn gerade freigeschaltet wird
-                             (!isUnlocked && !canAffordUnlock) || // Wenn gesperrt & nicht leisten können
-                             (isUnlocked && !canAffordPlacement) || // Wenn frei & nicht leisten können
-                             (isUnlocked && !!selectedUnitForPlacement && !isSelectedForPlacement); // Wenn frei, aber ANDERE Einheit gewählt ist
-
-            const handleClick = () => {
-                if (!isUnlocked) {
-                    handleUnlockUnit(unit.id);
-                } else {
-                    // Wenn diese bereits ausgewählt ist, Auswahl aufheben
-                    if (isSelectedForPlacement) {
-                        setSelectedUnitForPlacement(null);
-                    } else {
-                        handleSelectUnitForPlacement(unit);
-                    }
-                }
-            };
-
+        {/* Aktive Projektile */}
+        {activeProjectiles.map(projectile => {
+            const isOpponentProjectile = gameState?.hostId !== undefined && projectile.playerId !== gameState.hostId;
             return (
-              <button 
-                key={unit.id} 
-                className={`unit-tile ${isUnlocked ? 'unlocked' : 'locked'} ${isSelectedForPlacement ? 'selected-for-placement' : ''}`}
-                onClick={handleClick}
-                disabled={isDisabled}
-                title={`${unit.name}\nUnlock: ${unit.unlockCost}C\nPlace: ${unit.placementCost}C${!isUnlocked ? '\n(Click to Unlock)' : '\n(Click to Place)'}`}
-              >
-                {/* Schloss-Icon (wenn gesperrt) */}
-                {!isUnlocked && (
-                    <div className="unit-tile-lock" aria-hidden="true">🔒</div>
-                )}
-
-                {/* --- HIER kommt die Grafik rein --- */}
-                <img 
-                    src={`/assets/units/${unit.id}.png`} 
-                    alt={unit.name} 
-                    onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }} // Bild verstecken, Text zeigen bei Fehler
-                    loading="lazy"
-                />
-                {/* Fallback-Text, falls Bild nicht lädt */}
-                <span className="unit-tile-fallback hidden">{unit.icon || unit.id.substring(0,3)}</span> 
-                
-                {/* Kostenanzeige */}
-                <div className="unit-tile-cost">
-                    {isUnlocked ? `${unit.placementCost} C` : `${unit.unlockCost} C`}
-                </div>
-              </button>
+                // Umschließe mit ErrorBoundary und Suspense
+                <ErrorBoundary
+                    key={`${projectile.projectileId}-boundary`}
+                    fallback={
+                        // Fallback für Ladefehler (z.B. rote Kugel)
+                        <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
+                            <sphereGeometry args={[0.1, 8, 8]} />
+                            <meshStandardMaterial color="red" />
+                        </mesh>
+                    }
+                >
+                    <Suspense fallback={
+                        // Fallback während des Ladens (z.B. gelbe Kugel)
+                         <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
+                            <sphereGeometry args={[0.1, 8, 8]} />
+                            <meshStandardMaterial color="yellow" wireframe />
+                        </mesh>
+                    }>
+                        <ProjectileMesh 
+                            key={projectile.projectileId} 
+                            projectile={projectile} 
+                            isOpponent={isOpponentProjectile} 
+                        />
+                    </Suspense>
+                </ErrorBoundary>
             );
-          })}
-        </div>
-      </div>
-    </div>
+        })}
+
+    </>
   );
 };
 

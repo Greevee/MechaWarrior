@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { socket, connectSocket } from './socket';
 import { usePlayerStore } from './store/playerStore';
 import { useGameStore } from './store/gameStore';
@@ -6,7 +6,7 @@ import { GameState as ClientGameState } from './types/game.types';
 import { Socket } from 'socket.io-client';
 import LobbyBrowser from './components/LobbyBrowser';
 import LobbyMenu from './components/LobbyMenu';
-import GameScreen from './components/GameScreen';
+import GameLoader from './components/GameLoader';
 import './App.css';
 
 function App() {
@@ -29,12 +29,11 @@ function App() {
   useEffect(() => {
     const handleConnect = () => setConnected(true);
     const handleDisconnect = (reason: Socket.DisconnectReason) => {
-      console.log('App: Socket getrennt', reason);
+      console.warn('App: Socket getrennt', reason);
       resetState();
     };
 
     const handleGameStart = (initialGameState: ClientGameState) => {
-        console.log('Spielstart-Event empfangen:', initialGameState);
         setGameState(initialGameState);
         setCurrentLobbyId(null);
     };
@@ -61,7 +60,6 @@ function App() {
       if (inputUsername.trim() && isConnected) {
           setIsLoading(true);
           socket.emit('player:login', inputUsername.trim(), (response: any) => {
-              console.log('Login-Antwort vom Server:', response);
               if (response?.success && response?.playerId) { 
                   setStoreUsername(inputUsername.trim());
                   setPlayerId(response.playerId);
@@ -74,23 +72,30 @@ function App() {
       }
   };
 
-  // --- Debugging Log ---
-  console.log('[App Render] Zustand:', {
-    isConnected,
-    username,
-    playerId,
-    currentLobbyId,
-    gameState,
-  });
+  useEffect(() => {
+    const handleGameStateUpdate = (updatedGameState: ClientGameState) => {
+      // console.log('[App.tsx] game:state-update empfangen:', updatedGameState);
+      setGameState(updatedGameState);
+    };
+
+    socket.on('game:state-update', handleGameStateUpdate);
+
+    return () => {
+      socket.off('game:state-update', handleGameStateUpdate);
+    };
+  }, [setGameState]);
+
+  // Optional: Zustand loggen für Debugging
+  // console.log('[App Render] Zustand:', { isConnected, username, playerId, currentLobbyId, gameState });
 
   // --- Rendering Logic ---
   let content;
-  console.log('[App Render] Evaluiere content...'); // Log Start
+  // console.log('[App Render] Evaluiere content...');
   if (!isConnected) {
-      console.log('[App Render] => Zweig: !isConnected');
+      // console.log('[App Render] => Zweig: !isConnected');
       content = <p>Verbinde zum Server...</p>;
   } else if (!username) {
-      console.log('[App Render] => Zweig: !username (Login Form)');
+      // console.log('[App Render] => Zweig: !username (Login Form)');
       content = (
           <form onSubmit={handleLogin}>
               <h2>Benutzernamen eingeben</h2>
@@ -109,16 +114,16 @@ function App() {
           </form>
       );
   } else if (gameState) { 
-      console.log('[App Render] => Zweig: gameState');
-      content = <GameScreen />;
+      // console.log('[App Render] => Zweig: gameState -> GameLoader');
+      content = <GameLoader />;
   } else if (currentLobbyId) {
-      console.log('[App Render] => Zweig: currentLobbyId');
+      // console.log('[App Render] => Zweig: currentLobbyId');
       content = <LobbyMenu />;
   } else {
-      console.log('[App Render] => Zweig: else (LobbyBrowser)');
+      // console.log('[App Render] => Zweig: else (LobbyBrowser)');
       content = <LobbyBrowser />;
   }
-  console.log('[App Render] Zugewiesener content:', content ? content.type.name || typeof content.type : 'null'); // Logge Typ des Inhalts
+  // console.log('[App Render] Zugewiesener content:', content ? content.type.name || typeof content.type : 'null');
 
   return (
     <div className="App">

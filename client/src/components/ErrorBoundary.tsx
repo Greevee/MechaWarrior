@@ -3,6 +3,7 @@ import React, { Component, ErrorInfo, ReactNode } from 'react';
 interface Props {
   children: ReactNode;
   fallback?: ReactNode; // Optional: Eine Komponente oder JSX als Fallback
+  logErrors?: boolean; // NEU: Option zum Aktivieren/Deaktivieren des Loggings
 }
 
 interface State {
@@ -24,7 +25,10 @@ class ErrorBoundary extends Component<Props, State> {
   // Diese Methode wird ebenfalls aufgerufen, wenn ein Fehler auftritt.
   // Hier kannst du den Fehler protokollieren.
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("ErrorBoundary hat einen Fehler abgefangen:", error, errorInfo);
+    // Logge den Fehler nur, wenn die Prop gesetzt ist (oder standardmäßig)
+    if (this.props.logErrors !== false) { 
+        console.error("ErrorBoundary hat einen Fehler abgefangen:", error, errorInfo);
+    }
     // Hier könntest du den Fehler an einen externen Logging-Dienst senden
     // z.B. logErrorToMyService(error, errorInfo);
   }
@@ -32,8 +36,8 @@ class ErrorBoundary extends Component<Props, State> {
   public render() {
     if (this.state.hasError) {
       // Wenn ein Fehler aufgetreten ist, zeige die Fallback-UI an.
-      // Das kann eine einfache Nachricht sein oder eine übergebene Fallback-Komponente.
-      return this.props.fallback || <h1>Etwas ist schiefgelaufen.</h1>;
+      // Verwende die übergebene Fallback-Prop oder rendere standardmäßig null.
+      return this.props.fallback !== undefined ? this.props.fallback : null;
     }
 
     // Normalerweise werden einfach die Kinder gerendert.
