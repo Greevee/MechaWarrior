@@ -8,7 +8,7 @@ import { Lobby, LobbyPlayer, GameMode } from './types/lobby.types'; // Importier
 import { v4 as uuidv4 } from 'uuid'; // Importiere uuid zur ID-Generierung
 import { Faction } from './types/common.types'; // Import Faction
 import { GameState, PlayerInGame, GamePhase, PlacedUnit, FigureState, FigureBehaviorState, ProjectileState } from './types/game.types'; // Importiere Spiel-Typen
-import { Unit, placeholderUnits } from './units/unit.types'; // Import Unit types and data
+import { Unit, placeholderUnits, parseFormation } from './units/unit.types'; // Import Unit types and data
 
 dotenv.config(); // Lädt Umgebungsvariablen aus .env
 
@@ -933,41 +933,68 @@ io.on('connection', (socket: Socket) => {
     playerState.credits -= unitData.placementCost;
     playerState.unitsPlacedThisRound++; // Zähler erhöhen
     
-    // Erstelle die Figuren für die neue Einheit
+    // --- NEUE Logik zum Erstellen der Figuren mit Formation ---
     const figures: FigureState[] = [];
     const unitInstanceId = uuidv4(); 
-    const numFigures = unitData.squadSize;
-    const cols = Math.ceil(Math.sqrt(numFigures));
-    const figureSpacing = 1.0; 
-    let figureCount = 0;
-    for (let r = 0; figureCount < numFigures; r++) {
-        for (let c = 0; c < cols && figureCount < numFigures; c++) {
-            const offsetX = (c - (cols - 1) / 2) * figureSpacing;
-            const offsetZ = (r - Math.floor((numFigures - 1) / cols / 2)) * figureSpacing; 
-            const figure: FigureState = {
-                figureId: uuidv4(),
-                unitInstanceId: unitInstanceId,
-                playerId: playerId,
-                unitTypeId: unitId,
-                position: { 
-                    x: position.x + offsetX,
-                    z: position.z + offsetZ 
-                },
-                currentHP: unitData.hp, 
-                behavior: 'idle',
-                targetFigureId: null,
-                attackCooldownEnd: 0 
-            };
-            figures.push(figure);
-            figureCount++;
-        }
+    const formationInfo = parseFormation(unitData.formation);
+
+    // Wichtig: unitData.squadSize verwenden!
+    const useFormation = formationInfo && formationInfo.cols * formationInfo.rows >= unitData.squadSize;
+
+    let cols = 1;
+    let rows = 1;
+    let spacingX = 1.0; // Standardabstand
+    let spacingZ = 1.0; // Standardabstand
+
+    if (useFormation && formationInfo) {
+        cols = formationInfo.cols;
+        rows = formationInfo.rows;
+        spacingX = unitData.width > 0 ? unitData.width / cols : 1.0; // Verhindere Division durch 0
+        spacingZ = unitData.height > 0 ? unitData.height / rows : 1.0; // Verhindere Division durch 0
+        console.log(`Using formation ${cols}x${rows} for ${unitData.id}. Spacing X=${spacingX.toFixed(2)}, Z=${spacingZ.toFixed(2)} within Area W=${unitData.width}, H=${unitData.height}`);
+    } else {
+        console.warn(`Invalid formation '${unitData.formation}' for unit ${unitData.id} or squad size mismatch (${unitData.squadSize}). Using fallback arrangement.`);
+        cols = Math.ceil(Math.sqrt(unitData.squadSize));
+        rows = Math.ceil(unitData.squadSize / cols);
+        spacingX = unitData.width > 0 ? unitData.width / cols : 1.0;
+        spacingZ = unitData.height > 0 ? unitData.height / rows : 1.0;
     }
+
+    const startOffsetX = -unitData.width / 2 + spacingX / 2;
+    const startOffsetZ = -unitData.height / 2 + spacingZ / 2;
+
+    for (let i = 0; i < unitData.squadSize; i++) {
+        const col = i % cols;
+        const row = Math.floor(i / cols);
+
+        const offsetX = startOffsetX + col * spacingX;
+        const offsetZ = startOffsetZ + row * spacingZ;
+
+        const finalX = position.x + offsetX;
+        const finalZ = position.z + offsetZ;
+        
+        console.log(`  Figure ${i}: Col=${col}, Row=${row} -> OffsetX=${offsetX.toFixed(2)}, OffsetZ=${offsetZ.toFixed(2)} -> PosX=${finalX.toFixed(2)}, PosZ=${finalZ.toFixed(2)}`);
+
+        const figure: FigureState = {
+            figureId: uuidv4(),
+            unitInstanceId: unitInstanceId,
+            playerId: playerId,
+            unitTypeId: unitId,
+            position: { x: finalX, z: finalZ },
+            currentHP: unitData.hp, 
+            behavior: 'idle',
+            targetFigureId: null,
+            attackCooldownEnd: 0 
+        };
+        figures.push(figure);
+    }
+    // --- Ende NEUE Logik ---
 
     const newPlacedUnit: PlacedUnit = {
         instanceId: unitInstanceId, 
         unitId: unitId,
         playerId: playerId,
-        initialPosition: position, 
+        initialPosition: position, // Speichert den Klickpunkt als Mittelpunkt
         figures: figures, 
     };
     playerState.placedUnits.push(newPlacedUnit);

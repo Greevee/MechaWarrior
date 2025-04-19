@@ -22,6 +22,7 @@ export interface Unit {
   bulletSpeed?: number; // NEU: Geschwindigkeit der Geschosse (optional)
   collisionRange?: number; // NEU: Radius für Kollisionserkennung (optional)
   modelScale?: number; // NEU: Skalierungsfaktor für das 3D-Modell (optional)
+  formation: string;    // e.g., "5x2", "3x3", "1x1"
 }
 
 export const placeholderUnits: Unit[] = [
@@ -46,7 +47,8 @@ export const placeholderUnits: Unit[] = [
     speed: 2,
     bulletSpeed: 15,
     collisionRange: 0.5,
-    modelScale: 0.5
+    modelScale: 0.5,
+    formation: '5x2'
   },
   {
     id: 'human_sniper',
@@ -69,7 +71,8 @@ export const placeholderUnits: Unit[] = [
     speed: 1.5,
     bulletSpeed: 40,
     collisionRange: 0.4,
-    modelScale: 0.5
+    modelScale: 0.5,
+    formation: '1x1'
   },
   {
     id: 'machine_guardian',
@@ -92,7 +95,8 @@ export const placeholderUnits: Unit[] = [
     speed: 1.5,
     bulletSpeed: 20,
     collisionRange: 0.8,
-    modelScale: 1.0
+    modelScale: 1.0,
+    formation: '3x3'
   },
   {
     id: 'alien_stalker',
@@ -115,6 +119,17 @@ export const placeholderUnits: Unit[] = [
     speed: 3,
     bulletSpeed: 25,
     collisionRange: 0.4,
-    modelScale: 0.8
+    modelScale: 0.8,
+    formation: '1x1'
   }
-]; 
+];
+
+export function parseFormation(formation: string): { cols: number; rows: number } | null {
+  if (!formation || !formation.includes('x')) return null;
+  const parts = formation.split('x');
+  if (parts.length !== 2) return null;
+  const cols = parseInt(parts[0], 10);
+  const rows = parseInt(parts[1], 10);
+  if (isNaN(cols) || isNaN(rows) || cols <= 0 || rows <= 0) return null;
+  return { cols, rows };
+} 
