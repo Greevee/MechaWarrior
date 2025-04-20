@@ -559,23 +559,44 @@ export class GameManager {
                  let nearestEnemy: FigureState | null = null;
                  let minOverallDistSq: number = Infinity; 
 
+                 // Kann diese Einheit überhaupt Luftziele angreifen?
+                 const canAttackAnyAir = unitData.weapons.some(w => w.canTargetAir === true);
+
                  figureMap.forEach((potentialTarget: FigureState) => {
                      if (potentialTarget.playerId !== figure.playerId) {
-                         const distSq = this.calculateDistanceSq(figure.position, potentialTarget.position);
-                         if (distSq < minOverallDistSq) {
-                             minOverallDistSq = distSq;
-                             nearestEnemy = potentialTarget;
+                         // --- NEUE ZIELPRÜFUNG --- 
+                         const potentialTargetUnitData = placeholderUnits.find(u => u.id === potentialTarget.unitTypeId);
+                         const targetIsAir = potentialTargetUnitData?.isAirUnit === true;
+                         let isValidTarget = false;
+
+                         if (targetIsAir) {
+                             // Ziel ist Luft: Angreifer muss fähig sein, Luft anzugreifen
+                             if (canAttackAnyAir) {
+                                 isValidTarget = true;
+                             }
+                         } else {
+                             // Ziel ist Boden: Kann immer (potenziell) anvisiert werden
+                             isValidTarget = true;
                          }
+
+                         if (isValidTarget) {
+                             const distSq = this.calculateDistanceSq(figure.position, potentialTarget.position);
+                             if (distSq < minOverallDistSq) {
+                                 minOverallDistSq = distSq;
+                                 nearestEnemy = potentialTarget;
+                             }
+                         }
+                         // --- ENDE NEUE ZIELPRÜFUNG ---
                      }
-                 });
-                 // Nur zuweisen, wenn nearestEnemy nicht null ist
-                 if (nearestEnemy) {
-                     // Explizite Typassertion, um dem Compiler zu helfen
-                     figure.targetFigureId = (nearestEnemy as FigureState).figureId; 
-                     primaryTarget = nearestEnemy as FigureState;
-                     targetAcquired = true;
-                     unitsChanged = true; // Ziel hat sich geändert
-                 }
+                  });
+                  // Nur zuweisen, wenn nearestEnemy nicht null ist
+                  if (nearestEnemy) {
+                      // Explizite Typassertion, um dem Compiler zu helfen
+                      figure.targetFigureId = (nearestEnemy as FigureState).figureId; 
+                      primaryTarget = nearestEnemy as FigureState;
+                      targetAcquired = true;
+                      unitsChanged = true; // Ziel hat sich geändert
+                  }
              }
              
              // --- B. Bewegungs-Logik --- 
@@ -638,18 +659,40 @@ export class GameManager {
                                  let nearestSecondaryTarget: FigureState | null = null;
                                  let minDistForWeaponSq = weaponRangeSq; // Nur Ziele innerhalb der Waffenreichweite
 
+                                 // Kann DIESE Waffe Luftziele angreifen?
+                                 const weaponCanAttackAir = weapon.canTargetAir === true;
+
                                  figureMap.forEach(potentialSecondaryTarget => {
+                                     // --- NEUE SEKUNDÄRZIELPRÜFUNG ---
                                      if (potentialSecondaryTarget.playerId !== figure.playerId && 
-                                         potentialSecondaryTarget.figureId !== primaryTarget!.figureId) { // Nicht das Primärziel erneut
-                                         const distSq = this.calculateDistanceSq(figure.position, potentialSecondaryTarget.position);
-                                         if (distSq <= minDistForWeaponSq) { // Innerhalb Waffenreichweite UND näher als bisheriges Sekundärziel
-                                             minDistForWeaponSq = distSq;
-                                             nearestSecondaryTarget = potentialSecondaryTarget;
-                                         }
+                                         potentialSecondaryTarget.figureId !== primaryTarget?.figureId) { // Nicht das Primärziel erneut
+                                        
+                                        const potentialTargetUnitData = placeholderUnits.find(u => u.id === potentialSecondaryTarget.unitTypeId);
+                                        const targetIsAir = potentialTargetUnitData?.isAirUnit === true;
+                                        let isValidTargetForWeapon = false;
+
+                                        if (targetIsAir) {
+                                            // Ziel ist Luft: DIESE Waffe muss Luft angreifen können
+                                            if (weaponCanAttackAir) {
+                                                isValidTargetForWeapon = true;
+                                            }
+                                        } else {
+                                            // Ziel ist Boden: Jede Waffe kann (potenziell) treffen
+                                            isValidTargetForWeapon = true;
+                                        }
+
+                                        if (isValidTargetForWeapon) {
+                                            const distSq = this.calculateDistanceSq(figure.position, potentialSecondaryTarget.position);
+                                            if (distSq <= minDistForWeaponSq) { // Innerhalb Waffenreichweite UND näher als bisheriges Sekundärziel
+                                                minDistForWeaponSq = distSq;
+                                                nearestSecondaryTarget = potentialSecondaryTarget;
+                                            }
+                                        }
                                      }
-                                 });
-                                 targetForThisWeapon = nearestSecondaryTarget;
-                             }
+                                     // --- ENDE NEUE SEKUNDÄRZIELPRÜFUNG ---
+                                  });
+                                  targetForThisWeapon = nearestSecondaryTarget;
+                              }
 
                              // Feuern, wenn ein Ziel (primär oder sekundär) für DIESE Waffe gefunden wurde
                              if (targetForThisWeapon) {
@@ -672,6 +715,7 @@ export class GameManager {
                                      playerId: figure.playerId,
                                      unitTypeId: figure.unitTypeId, // Behalte Unit-Typ für Referenz?
                                      sourceUnitInstanceId: figure.unitInstanceId,
+                                     weaponId: weapon.id, // <<< NEU: ID der Waffe mitspeichern
                                      // *** Nimm Werte von der Waffe ***
                                      damage: weapon.damage,
                                      projectileType: weapon.projectileType,
@@ -714,6 +758,15 @@ export class GameManager {
              figureMap.forEach(other => {
                  if (figure.figureId === other.figureId || !nextPositions.has(other.figureId)) return;
                  const otherUnitData = placeholderUnits.find(u => u.id === other.unitTypeId)!;
+
+                 // --- NEUE PRÜFUNG: Nur Kollision prüfen, wenn beide Einheiten denselben Bewegungstyp haben ---
+                 const figureIsAir = unitData?.isAirUnit ?? false;
+                 const otherIsAir = otherUnitData?.isAirUnit ?? false;
+                 if (figureIsAir !== otherIsAir) {
+                     return; // Überspringe Kollisionsprüfung, wenn eine Luft und eine Boden ist
+                 }
+                 // --- ENDE NEUE PRÜFUNG ---
+
                  const otherCollisionRange = otherUnitData.collisionRange ?? 0.4;
                  const otherPos = nextPositions.get(other.figureId)!;
                  const distSq = this.calculateDistanceSq(intendedPos, otherPos);

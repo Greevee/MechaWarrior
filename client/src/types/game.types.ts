@@ -15,11 +15,13 @@ export interface Weapon {
   splashRadius: number;
   range: number;
   bulletSpeed?: number;
+  canTargetAir?: boolean;
   recoilDurationMs?: number;
   recoilDistance?: number;
   projectileRenderType: 'image' | 'computer';
   projectileType: 'targeted' | 'ballistic';
   impactEffectImage?: boolean;
+  impactEffectImagePath?: string;
   projectileColor?: string;
   projectileLineWidth?: number;
   projectileTrailLength?: number;
@@ -79,6 +81,7 @@ export interface ProjectileState {
     playerId: number;       
     unitTypeId: string;     
     sourceUnitInstanceId: string; // NEU: Welche Instanz hat geschossen?
+    weaponId: string; // NEU: ID der Waffe, die gefeuert hat
     damage: number;         
     projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
     speed: number;          

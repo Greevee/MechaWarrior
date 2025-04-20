@@ -7,12 +7,14 @@ export interface Weapon {
   attackSpeed: number; // Angriffe pro Sekunde
   splashRadius: number;
   range: number;
+  canTargetAir?: boolean; // NEU: Kann diese Waffe Lufteinheiten angreifen? (Standard: false)
   bulletSpeed?: number;
   recoilDurationMs?: number; // Optional, nicht jede Waffe hat Rückstoß
   recoilDistance?: number;  // Optional
   projectileRenderType: 'image' | 'computer';
   projectileType: 'targeted' | 'ballistic';
   impactEffectImage?: boolean; // Zeigt an, ob beim Einschlag ein Effekt gezeigt wird
+  impactEffectImagePath?: string; // NEU: Pfad zum Impact-Effekt-Bild (wenn impactEffectImage true ist)
 
   // Optional: Nur relevant wenn projectileRenderType === 'computer'
   projectileColor?: string;
@@ -22,6 +24,7 @@ export interface Weapon {
   projectileForwardOffset?: number;
 
   // Optional: Nur relevant wenn projectileRenderType === 'image'
+  projectileImagePath?: string; // NEU: Pfad zum Projektil-Bild
   projectileImageScale?: number;
 }
 // +++ Ende Waffendefinition +++
@@ -67,6 +70,7 @@ export const infantryRifle: Weapon = {
     attackSpeed: 1,
     splashRadius: 0,
     range: 10,
+    canTargetAir: true,
     bulletSpeed: 30,
     recoilDurationMs: 150,
     recoilDistance: 0.1,
@@ -86,12 +90,15 @@ export const smallTankCannon: Weapon = {
     attackSpeed: 0.3,
     splashRadius: 0.2,
     range: 12,
+    canTargetAir: false,
     bulletSpeed: 15,
     recoilDurationMs: 250,
     recoilDistance: 0.25,
     projectileRenderType: 'image',
     projectileType: 'targeted',
     impactEffectImage: true,
+    impactEffectImagePath: 'weapons/impacts/weapon_small_tank_cannon_impact.png',
+    projectileImagePath: 'weapons/projectiles/small_tank_cannon_projectile.png',
     projectileImageScale: 0.5
 };
 
@@ -101,16 +108,37 @@ export const catapultStone: Weapon = {
     attackSpeed: 0.2,
     splashRadius: 1.0,
     range: 12,
+    canTargetAir: false,
     bulletSpeed: 10,
-    // Kein Recoil für Katapult
     projectileRenderType: 'image',
     projectileType: 'ballistic',
     impactEffectImage: true,
+    impactEffectImagePath: 'weapons/impacts/weapon_catapult_stone_impact.png',
+    projectileImagePath: 'weapons/projectiles/catapult_stone_projectile.png',
     projectileImageScale: 1
 };
 
+// NEU: Waffe für Moloch
+export const molochCannon: Weapon = {
+    id: 'moloch_cannon',
+    damage: 1200, // Starker Einzelschaden
+    attackSpeed: 0.4, // Langsamer als Panzer
+    splashRadius: 0.5, // Kleiner Splash
+    range: 14, // Gute Reichweite
+    canTargetAir: true, // Kann Boden & Luft
+    bulletSpeed: 18,
+    recoilDurationMs: 300, // Deutlicher Rückstoß
+    recoilDistance: 0.3,
+    projectileRenderType: 'image', // Großes Projektil-Sprite?
+    projectileType: 'ballistic', // Fliegt im Bogen
+    impactEffectImage: true,
+    impactEffectImagePath: 'weapons/impacts/weapon_moloch_cannon_impact.png',
+    projectileImagePath: 'weapons/projectiles/moloch_cannon_projectile.png',
+    projectileImageScale: 1.2 // Großes Projektil
+};
+
 // Optional: Eine Sammlung aller Waffen für einfachen Zugriff?
-export const placeholderWeapons: Weapon[] = [infantryRifle, smallTankCannon, catapultStone];
+export const placeholderWeapons: Weapon[] = [infantryRifle, smallTankCannon, catapultStone, molochCannon];
 // +++ Ende Platzhalter-Waffen +++
 
 export const placeholderUnits: Unit[] = [
@@ -186,6 +214,29 @@ export const placeholderUnits: Unit[] = [
     weapons: [catapultStone],
     isAirUnit: false,
     mainWeaponIndex: 0
+  },
+  { // NEUE EINHEIT: Moloch
+    id: 'human_moloch',
+    name: 'Moloch Luftschiff',
+    faction: 'Human',
+    width: 4,
+    height: 4,
+    squadSize: 1, // Einzelne Einheit
+    hp: 15000, // Sehr robust
+    armor: 0.25, // Gut gepanzert
+    damageReduction: 5,
+    shield: 0,
+    placementCost: 600, // Sehr teuer
+    unlockCost: 0,
+    icon: 'human_moloch_icon', // Platzhalter
+    speed: 1.2, // Relativ langsam für eine Lufteinheit?
+    collisionRange: 1.8, // Großer Kollisionsradius
+    renderScale: 4, // Großes Sprite
+    formation: '1x1',
+    placementSpread: 0,
+    weapons: [molochCannon, infantryRifle, infantryRifle], // Hauptkanone, zwei Gewehre
+    isAirUnit: true, // Lufteinheit!
+    mainWeaponIndex: 0 // Kanone verursacht sichtbaren Recoil
   }
 ];
 

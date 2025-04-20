@@ -24,6 +24,7 @@ export interface ProjectileState {
     playerId: number;       // Spieler, der geschossen hat
     unitTypeId: string;     // Einheitentyp (für Schaden etc.)
     sourceUnitInstanceId: string; // NEU: Welche Instanz hat geschossen?
+    weaponId: string; // NEU: ID der Waffe, die gefeuert hat
     damage: number;         // Schaden des Projektils
     projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
     speed: number;          // Fluggeschwindigkeit (für 'targeted' relevant)

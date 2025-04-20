@@ -20,6 +20,9 @@ const GRID_MAX_X = GRID_WIDTH / 2;
 const GRID_MIN_Z = 0;
 const GRID_MAX_Z = TOTAL_DEPTH;
 
+// +++ NEU: Konstante für Flughöhe +++
+const FLIGHT_HEIGHT = 2.0;
+
 // +++ NEU: Hilfsfunktionen und Konstanten für Client-Simulation +++
 const MAX_PROJECTILE_ARC_HEIGHT = 5; // Muss mit Server übereinstimmen!
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -72,6 +75,7 @@ interface FigureSpriteProps {
     texturePath: string; // Direkter Pfad zur Textur
     onClick: (event: any) => void; // Click Handler
     gamePhase: GamePhase; // Für Ausrichtung in Preparation
+    isAirUnit: boolean; // NEU
 }
 
 const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
@@ -90,13 +94,16 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
     texturePath,
     onClick,
     gamePhase,
+    isAirUnit, // Empfangen
 }) => {
     const meshRef = useRef<THREE.Group>(null!);
-    // Initialposition mit korrektem Y-Offset (halbe Höhe)
-    const yOffset = spriteHeight / 2;
-    const interpolatedPosition = useRef(new THREE.Vector3(position.x, yOffset, position.z));
-    const targetPosition = useMemo(() => new THREE.Vector3(position.x, yOffset, position.z), [
-        position.x, position.z, yOffset // Y-Offset hinzufügen
+    // NEU: Berechne Basis-Y-Position inkl. Flughöhe
+    const baseYPosition = useMemo(() => {
+        return (isAirUnit ? FLIGHT_HEIGHT : 0) + spriteHeight / 2;
+    }, [isAirUnit, spriteHeight]);
+    const interpolatedPosition = useRef(new THREE.Vector3(position.x, baseYPosition, position.z));
+    const targetPosition = useMemo(() => new THREE.Vector3(position.x, baseYPosition, position.z), [
+        position.x, position.z, baseYPosition // Basis-Y verwenden
     ]);
     const lastPosition = useRef(new THREE.Vector3().copy(interpolatedPosition.current));
     const facingScaleX = useRef(1);
@@ -145,13 +152,15 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
 
     useFrame((state, delta) => {
         let bobbingOffsetY = 0;
-        if (behavior === 'moving') {
+        // Bobbing nur für Bodeneinheiten?
+        if (!isAirUnit && behavior === 'moving') { 
             if (moveBobbingFrequency > 0 && moveBobbingAmplitude > 0) {
                 bobbingOffsetY = Math.sin(state.clock.elapsedTime * moveBobbingFrequency * 2 * Math.PI) * moveBobbingAmplitude;
             }
         }
 
-        const finalTargetY = yOffset + bobbingOffsetY;
+        // NEU: Finale Ziel-Y Position inkl. Flughöhe und Bobbing
+        const finalTargetY = baseYPosition + bobbingOffsetY;
         targetPosition.set(position.x, finalTargetY, position.z);
 
         interpolatedPosition.current.lerp(targetPosition, 0.1);
@@ -233,7 +242,7 @@ interface FigureMeshProps {
     currentHP: number;
     weaponCooldowns: { [weaponId: string]: number };
     gamePhase: GamePhase;
-    // Keine figureData mehr!
+    isAirUnit: boolean; // NEU
 }
 
 const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
@@ -244,6 +253,7 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
     currentHP,
     weaponCooldowns,
     gamePhase,
+    isAirUnit, // Empfangen
 }) => {
     const { setSelectedFigureId } = useGameStore();
 
@@ -306,6 +316,7 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
                 texturePath={texturePath}
                 onClick={handleClick}
                 gamePhase={gamePhase}
+                isAirUnit={isAirUnit} // Weitergeben
             />
             {/* Rendere HealthBar nur wenn nötig */}
             {currentHP < maxHP &&
@@ -319,15 +330,20 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
 
 // --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary und granularen Props) ---
 const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }> = React.memo(({ placedUnit, gamePhase }) => {
+    // Hole unitData einmal für die ganze Einheit
+    // NEU: Verwende unitId aus PlacedUnit
+    const unitData = useMemo(() => placeholderUnits.find(u => u.id === placedUnit.unitId), [placedUnit.unitId]);
+    const isAirUnit = unitData?.isAirUnit ?? false;
+
     return (
         <group userData={{ unitInstanceId: placedUnit.instanceId }}>
             {placedUnit.figures.map((figure: FigureState) => {
-                // +++ NEU: Extrahiere Props für FigureMesh +++
-                const { figureId, unitTypeId, behavior, position, currentHP } = figure;
+                // Extrahiere Props für FigureMesh
+                const { figureId, unitTypeId, behavior, position, currentHP, weaponCooldowns } = figure; // unitTypeId wird hier geholt
 
                 // Definiere den Fallback für diese Figur
                 const fallbackMesh = (color: string, wireframe = false) => (
-                    <mesh position={[position.x, 0.5, position.z]}>
+                    <mesh position={[position.x, 0.5, position.z]}> 
                         <boxGeometry args={[0.5, 0.5, 0.5]} />
                         <meshStandardMaterial color={color} wireframe={wireframe} />
                     </mesh>
@@ -335,19 +351,20 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }>
 
                 return (
                     <ErrorBoundary
-                        key={figureId} // Key hier setzen!
+                        key={figureId} 
                         fallback={fallbackMesh("red")}
                     >
                         <Suspense fallback={fallbackMesh("yellow", true)}>
-                            {/* Übergebe granulare Props an FigureMesh */}
+                            {/* Übergebe granulare Props an FigureMesh */} 
                             <FigureMesh
                                 figureId={figureId}
                                 unitTypeId={unitTypeId}
                                 behavior={behavior}
-                                position={position} // Position-Objekt ist ok, da es sich oft komplett ändert
+                                position={position} 
                                 currentHP={currentHP}
-                                weaponCooldowns={figure.weaponCooldowns}
+                                weaponCooldowns={weaponCooldowns}
                                 gamePhase={gamePhase}
+                                isAirUnit={isAirUnit} // NEU: Übergeben
                             />
                         </Suspense>
                     </ErrorBoundary>
@@ -404,21 +421,38 @@ interface InstancedProjectileMeshesProps {
 }
 
 const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = React.memo(({ unitTypeId, projectiles }) => {
+    // +++ DEBUG LOG: Check if component renders and received projectiles +++
+    console.log(`InstancedProjectileMeshes rendering for ${unitTypeId}`, projectiles);
+    // +++ END DEBUG LOG +++
+
     const meshRef = useRef<THREE.InstancedMesh>(null!); // Ref für InstancedMesh
     const dummyObject = useMemo(() => new THREE.Object3D(), []); // Hilfsobjekt für Matrix-Berechnung
     const targetPositionVec = useMemo(() => new THREE.Vector3(), []); 
 
+    // --- WICHTIG: Hole weaponId vom ersten Projektil --- 
+    // Annahme: Alle Projektile in diesem Array gehören zur selben Waffe (da nach unitTypeId gruppiert)
+    const weaponId = useMemo(() => projectiles[0]?.weaponId, [projectiles]);
+
     // +++ NEU: Hole unitData, um Skalierungsfaktor zu bekommen +++
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === unitTypeId), [unitTypeId]);
+    // Skalierung weiterhin über unitData/erste Waffe? Oder sollte das spezifischer sein?
     const scaleModifier = unitData?.weapons[0]?.projectileImageScale ?? 1; 
 
-    // --- Sprite Loading (nur einmal pro Typ) ---
-    const getProjectileTexturePath = (typeId: string): string => {
-        return `/assets/projectiles/${typeId}_projectile.png`;
-    };
-    const texturePath = useMemo(() => getProjectileTexturePath(unitTypeId), [unitTypeId]);
+    // --- Sprite Loading (angepasster Pfad) --- 
+    // Entferne alte Helper-Funktion
+    // Baue Pfad direkt mit weaponId (falls vorhanden)
+    const texturePath = useMemo(() => {
+        if (!weaponId) {
+            console.warn(`InstancedProjectileMeshes (${unitTypeId}): Keine weaponId gefunden, um Projektil-Textur zu laden.`);
+            // Fallback oder leeren String zurückgeben, um Fehler zu vermeiden?
+            return '/assets/placeholder.png'; // Oder ein anderer Fallback?
+        }
+        return `/assets/weapons/projectiles/${weaponId}_projectile.png`;
+    }, [weaponId, unitTypeId]); // Abhängigkeit von weaponId hinzugefügt
+    
     const spriteTexture = useTexture(texturePath); 
 
+    // Textur-Setup und Dimensionsberechnung bleiben ähnlich...
     const aspectWidth = spriteTexture?.image?.width ?? 1;
     const aspectHeight = spriteTexture?.image?.height ?? 1;
     const spriteAspect = aspectWidth / aspectHeight;
@@ -428,14 +462,6 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
     const spriteHeight = baseSpriteHeight * scaleModifier;
     const spriteWidth = spriteHeight * spriteAspect;
     const yOffset = spriteHeight / 2; // Y-Offset basiert auf finaler Höhe
-
-    // Textur-Setup
-    useEffect(() => {
-        if (spriteTexture) {
-            spriteTexture.colorSpace = THREE.SRGBColorSpace;
-            spriteTexture.needsUpdate = true;
-        }
-    }, [spriteTexture]);
 
     // useEffect zum Setzen der initialen/aktuellen Matrizen (bleibt wichtig für Start/Reset)
     useEffect(() => {
@@ -511,6 +537,13 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 
             // Billboard-Effekt (bleibt gleich)
             dummyObject.lookAt(cameraPosition);
+
+            // +++ DEBUG LOG: Check calculated position before matrix update +++
+            // Logge nur gelegentlich, um die Konsole nicht zu fluten (z.B. alle 60 Frames)
+            if (state.clock.elapsedTime % 1 < delta) { // Annahme: delta ist ca. 1/60s
+                console.log(`InstancedProjectileMeshes (${unitTypeId})[${i}]: finalPos=`, finalX.toFixed(2), finalY.toFixed(2), finalZ.toFixed(2));
+            }
+            // +++ END DEBUG LOG +++
 
             // Matrix aktualisieren & setzen
             dummyObject.updateMatrix();
@@ -661,7 +694,9 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({
 interface ImpactEffectProps {
     id: string; // Eindeutige ID für diesen Effekt
     position: THREE.Vector3;
-    unitTypeId: string;
+    // unitTypeId wird nicht mehr benötigt, wenn impactTexturePath vorhanden ist
+    // unitTypeId?: string; 
+    impactTexturePath: string; // NEU: Erforderlicher Pfad zur Textur
     onComplete: (id: string) => void; // Callback zum Entfernen
     duration?: number; // Dauer des Effekts in Sekunden
 }
@@ -669,14 +704,16 @@ interface ImpactEffectProps {
 const ImpactEffect: React.FC<ImpactEffectProps> = ({ 
     id, 
     position, 
-    unitTypeId, 
+    // unitTypeId, // Entfernt
+    impactTexturePath, // NEU
     onComplete, 
     duration = 1.0 // Dauer jetzt 1 Sekunde
 }) => {
     const meshRef = useRef<THREE.Mesh>(null!);
     const materialRef = useRef<THREE.MeshBasicMaterial>(null!);
     const startTime = useRef(Date.now());
-    const texturePath = `/assets/units/${unitTypeId}/impact/impact.png`;
+    // Korrigierter Pfad:
+    const texturePath = `/assets/${impactTexturePath}`;
 
     // Lade die Impact-Textur
     // Fehler werden durch Suspense/ErrorBoundary außen behandelt
@@ -800,6 +837,7 @@ interface ActiveImpactEffect {
     id: string;
     position: THREE.Vector3;
     unitTypeId: string;
+    impactTexturePath?: string;
 }
 
 // NEU: Komponente für die umgebende Landschaft
@@ -846,13 +884,17 @@ const GameScreen: React.FC<GameScreenProps> = ({
 }) => {
   const { camera } = useThree(); 
   
+  // +++ DEBUG LOG: Check incoming activeProjectiles +++
+  console.log("GameScreen received gameState.activeProjectiles:", gameState?.activeProjectiles);
+  // +++ END DEBUG LOG +++
+
   // Zustand für die aktuell sichtbaren Impact-Effekte
   const [activeImpactEffects, setActiveImpactEffects] = useState<ActiveImpactEffect[]>([]);
   
   // Ref, um den vorherigen GameState für den Vergleich zu speichern
   const prevGameStateRef = useRef<ClientGameState | null>(null);
-  // Ref, um die IDs der aktuell gerenderten Projektile zu speichern
-  const currentProjectileIdsRef = useRef<Set<string>>(new Set());
+  // NEU: Ref, um die IDs der Projektile des *vorherigen* Frames zu speichern
+  const prevProjectileIdsRef = useRef<Set<string>>(new Set());
 
 
   // Berechnungen, die *nur* für die 3D-Szene relevant sind:
@@ -883,53 +925,69 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return { imageProjectilesGrouped: imgGroups, computerProjectilesWithConfig: compWithConfig };
   }, [activeProjectiles]);
 
-  // Update der aktuell gerenderten Projektil-IDs bei jeder Änderung
-   useEffect(() => {
-        currentProjectileIdsRef.current = new Set(activeProjectiles.map(p => p.projectileId));
-    }, [activeProjectiles]);
-
   // Effekt zum Erkennen von entfernten Projektilen und Hinzufügen von Impacts
    useEffect(() => {
-        if (prevGameStateRef.current && gameState) {
-            const prevProjectiles = prevGameStateRef.current.activeProjectiles ?? [];
-            const currentProjectileIds = currentProjectileIdsRef.current; // Verwende die Ref
+        // Hole aktuelle Projektile und deren IDs
+        const currentProjectiles = gameState?.activeProjectiles ?? [];
+        const currentProjectileIds = new Set(currentProjectiles.map(p => p.projectileId));
+        // Hole die IDs aus dem vorherigen Frame
+        const prevProjectileIds = prevProjectileIdsRef.current;
 
-            prevProjectiles.forEach(prevProjectile => {
-                // Wenn ein Projektil im vorherigen Frame da war, aber jetzt nicht mehr...
-                if (!currentProjectileIds.has(prevProjectile.projectileId)) {
-                    
-                    // Finde die Unit-Daten des Projektils
-                    const unitData = placeholderUnits.find(u => u.id === prevProjectile.unitTypeId);
+        // Finde entfernte Projektil-IDs: IDs, die im vorherigen Set waren, aber nicht im aktuellen
+        const removedProjectileIds = new Set(
+            [...prevProjectileIds].filter(id => !currentProjectileIds.has(id))
+        );
 
-                    // Prüfe, ob die Einheit (bzw. ihre erste Waffe) einen Impact-Effekt hat
-                    if (unitData?.weapons && unitData.weapons.length > 0 && unitData.weapons[0]?.impactEffectImage) {
-                        // console.log(`Impact detected for projectile ${prevProjectile.projectileId} from unit ${unitData.id}`);
-                        
-                        // Erstelle einen neuen Impact-Effekt an der letzten Position
-                        const impactPosition = new THREE.Vector3(
-                            prevProjectile.currentPos.x, 
-                            0.5, // Höhe des Impacts (anpassen?)
-                            prevProjectile.currentPos.z
-                        );
-                        
-                        const newEffect: ActiveImpactEffect = {
-                            id: uuidv4(), // Eindeutige ID generieren
-                            position: impactPosition,
-                            unitTypeId: unitData.id,
-                        };
+        // Nur fortfahren, wenn Projektile entfernt wurden UND ein vorheriger Zustand existiert
+        if (removedProjectileIds.size > 0 && prevGameStateRef.current) {
+            // Erstelle eine Map der *vorherigen* Projektile für schnellen Zugriff
+            const prevProjectilesLookup = new Map(
+                 (prevGameStateRef.current.activeProjectiles ?? []).map(p => [p.projectileId, p])
+            );
 
-                        // Füge den neuen Effekt zum State hinzu
-                        setActiveImpactEffects(prevEffects => [...prevEffects, newEffect]);
-                    }
+            // Verarbeite jede entfernte Projektil-ID
+            removedProjectileIds.forEach(removedId => {
+                const prevProjectile = prevProjectilesLookup.get(removedId);
+                // Sollte nicht passieren, aber sicher ist sicher
+                if (!prevProjectile) return; 
+
+                // Finde die Unit-Daten des entfernten Projektils
+                const unitData = placeholderUnits.find(u => u.id === prevProjectile.unitTypeId);
+                const weapon = unitData?.weapons?.[0];
+
+                // Prüfe, ob Impact-Effekt angezeigt werden soll (inkl. Pfad-Check)
+                if (unitData && weapon?.impactEffectImage && weapon.impactEffectImagePath) {
+                    const path = weapon.impactEffectImagePath;
+                    // Erstelle Position aus dem *vorherigen* Projektilzustand
+                    const impactPosition = new THREE.Vector3(
+                        prevProjectile.currentPos.x,
+                        0.5, // Höhe des Impacts (anpassen?)
+                        prevProjectile.currentPos.z
+                    );
+
+                    const newEffect: ActiveImpactEffect = {
+                        id: uuidv4(),
+                        position: impactPosition,
+                        unitTypeId: unitData.id,
+                        impactTexturePath: path
+                    };
+
+                    // Füge den neuen Effekt zum State hinzu
+                    // Wichtig: Verwende die funktionale Form von setState, um Race Conditions zu vermeiden
+                    setActiveImpactEffects(prevEffects => [...prevEffects, newEffect]);
+
+                } else if (unitData && weapon?.impactEffectImage && !weapon.impactEffectImagePath) {
+                    // Warnung, wenn Flag gesetzt, aber Pfad fehlt
+                    console.warn(`Weapon ${weapon.id} of unit ${unitData.id} has impactEffectImage=true but no impactEffectImagePath defined.`);
                 }
             });
         }
 
-        // Speichere den aktuellen gameState für den nächsten Vergleich
-        // WICHTIG: Erstelle eine tiefe Kopie, um Referenzprobleme zu vermeiden,
-        // oder stelle sicher, dass gameState unveränderlich ist.
-        // Wenn gameState direkt mutiert wird, funktioniert dieser Vergleich nicht.
-        // Annahme: gameState wird bei jedem Update neu erstellt (z.B. durch State-Management).
+        // Aktualisiere die Refs für den nächsten Render NACH der Verarbeitung
+        prevProjectileIdsRef.current = currentProjectileIds;
+        // Speichere den aktuellen gameState für den nächsten Vergleich.
+        // ACHTUNG: Dies ist nur sicher, wenn gameState als immutable behandelt wird.
+        // Eine tiefe Kopie wäre sicherer, ist hier aber schwierig wegen THREE.Vector3 etc.
         prevGameStateRef.current = gameState; 
 
     }, [gameState]); // Abhängigkeit nur von gameState
@@ -1083,11 +1141,13 @@ const GameScreen: React.FC<GameScreenProps> = ({
              );
         })}
         
-        {/* Aktive Impact-Effekte rendern (bleibt unverändert) */} 
+        {/* Aktive Impact-Effekte rendern */} 
         {activeImpactEffects.map(effect => {
-             // Finde Unit-Daten für den Fallback / Suspense
-            const unitData = placeholderUnits.find(u => u.id === effect.unitTypeId);
-            const impactTexturePath = unitData ? `/assets/units/${unitData.id}/impact/impact.png` : ''; // Pfad für useTexture
+             // Überspringe Rendering, wenn kein Pfad vorhanden ist (sollte nicht passieren durch Logik oben)
+             if (!effect.impactTexturePath) {
+                 console.warn(`Impact effect ${effect.id} hat keinen impactTexturePath.`);
+                 return null;
+             }
 
              return (
                 <ErrorBoundary
@@ -1111,7 +1171,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
                             key={effect.id} // Eindeutiger Key für den Effekt selbst
                             id={effect.id}
                             position={effect.position}
-                            unitTypeId={effect.unitTypeId}
+                            // Korrekte Prop übergeben:
+                            impactTexturePath={effect.impactTexturePath} 
                             onComplete={handleImpactComplete}
                         />
                      </Suspense>
