@@ -7,8 +7,8 @@ import { GameMode } from "./lobby.types";
 // WORKAROUND: Definiere Faction hier direkt
 export type Faction = 'Human' | 'Machine' | 'Alien';
 
-export type GamePhase = 'Preparation' | 'Combat' | 'GameOver';
-export type FigureBehaviorState = 'idle' | 'moving' | 'attacking'; // Hinzugefügt
+export type GamePhase = 'Preparation' | 'Combat' | 'RoundOver' | 'GameOver';
+export type FigureBehaviorState = 'idle' | 'moving' | 'attacking' | 'dead';
 
 // Zustand einer einzelnen Figur auf dem Schlachtfeld (vom Server kopiert)
 export interface FigureState {
@@ -19,7 +19,7 @@ export interface FigureState {
     position: { x: number; z: number };
     currentHP: number;
     behavior: FigureBehaviorState;
-    targetFigureId: string | null;
+    targetFigureId?: string;
     attackCooldownEnd: number;
 }
 
@@ -30,12 +30,15 @@ export interface ProjectileState {
     unitTypeId: string;     
     sourceUnitInstanceId: string; // NEU: Welche Instanz hat geschossen?
     damage: number;         
+    projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
     speed: number;          
+    splashRadius: number;   // NEU: Radius für Flächenschaden
     originPos: { x: number; z: number }; 
     targetPos: { x: number; z: number }; 
-    currentPos: { x: number; z: number }; 
+    currentPos: { x: number; y: number; z: number }; // NEU: Inklusive Y-Koordinate
     targetFigureId: string; 
     createdAt: number;      
+    totalFlightTime: number; // NEU: Berechnete Flugzeit in Sekunden
 }
 
 // Struktur für eine platzierte Einheit (Client-Version, vom Server kopiert)

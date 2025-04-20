@@ -1,7 +1,7 @@
 import { Faction } from "./common.types";
 import { GameMode } from "./lobby.types";
 
-export type GamePhase = 'Preparation' | 'Combat' | 'GameOver';
+export type GamePhase = 'Preparation' | 'Combat' | 'RoundOver' | 'GameOver';
 export type FigureBehaviorState = 'idle' | 'moving' | 'attacking';
 
 // NEU: Zustand einer einzelnen Figur auf dem Schlachtfeld
@@ -24,12 +24,15 @@ export interface ProjectileState {
     unitTypeId: string;     // Einheitentyp (für Schaden etc.)
     sourceUnitInstanceId: string; // NEU: Welche Instanz hat geschossen?
     damage: number;         // Schaden des Projektils
-    speed: number;          // Fluggeschwindigkeit
-    originPos: { x: number; z: number }; // Startpunkt
-    targetPos: { x: number; z: number }; // Zielpunkt (Position des Ziels beim Feuern)
-    currentPos: { x: number; z: number }; // Aktuelle Position
-    targetFigureId: string; // ID der Zielfigur
+    projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
+    speed: number;          // Fluggeschwindigkeit (für 'targeted' relevant)
+    splashRadius: number;   // NEU: Radius für Flächenschaden (vom Unit übernommen)
+    originPos: { x: number; z: number }; // Startpunkt (Boden)
+    targetPos: { x: number; z: number }; // Zielpunkt (Boden) / Einschlagsort
+    currentPos: { x: number; y: number; z: number }; // Aktuelle Position (inkl. Höhe)
+    targetFigureId: string; // ID der Zielfigur (für 'targeted')
     createdAt: number;      // Zeitstempel der Erstellung (ms)
+    totalFlightTime: number; // NEU: Berechnete Flugzeit in Sekunden (für 'ballistic')
 }
 
 // Struktur für eine platzierte Einheit (Server-Version)

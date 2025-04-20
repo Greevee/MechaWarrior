@@ -20,6 +20,15 @@ const GRID_MAX_X = GRID_WIDTH / 2;
 const GRID_MIN_Z = 0;
 const GRID_MAX_Z = TOTAL_DEPTH;
 
+// +++ NEU: Hilfsfunktionen und Konstanten für Client-Simulation +++
+const MAX_PROJECTILE_ARC_HEIGHT = 5; // Muss mit Server übereinstimmen!
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+const calculateParabolicHeight = (t: number, maxHeight: number): number => {
+    // Einfache Parabelformel: y = 4 * h * t * (1 - t)
+    return 4 * maxHeight * t * (1 - t);
+};
+// +++ Ende Hilfsfunktionen +++
+
 // --- Health Bar Component ---
 const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = React.memo(({ currentHP, maxHP, scale }) => {
     const healthRatio = Math.max(0, currentHP / maxHP);
@@ -52,7 +61,6 @@ interface FigureSpriteProps {
     behavior: FigureBehaviorState;
     attackCooldownEnd: number; // Für Rückstoß-Trigger
     position: { x: number; z: number }; // Nur X/Z für Zielposition
-    modelScale: number;
     moveBobbingFrequency: number;
     moveBobbingAmplitude: number;
     recoilDurationMs: number;
@@ -70,7 +78,6 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
     behavior,
     attackCooldownEnd,
     position,
-    modelScale, // Wird aktuell nicht direkt genutzt, aber ggf. für Skalierung? Behalten wir erstmal.
     moveBobbingFrequency,
     moveBobbingAmplitude,
     recoilDurationMs,
@@ -213,7 +220,7 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
 
     // Hole Unit-Daten basierend auf unitTypeId
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === unitTypeId), [unitTypeId]);
-    const modelScale = unitData?.modelScale ?? 1;
+    const renderScale = unitData?.renderScale ?? 1;
     const maxHP = unitData?.hp ?? 100;
     const moveBobbingFrequency = unitData?.moveBobbingFrequency ?? 0;
     const moveBobbingAmplitude = unitData?.moveBobbingAmplitude ?? 0;
@@ -221,22 +228,19 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
     const recoilDistance = unitData?.recoilDistance ?? 0.15;
 
     // --- Berechne Sprite-Dimensionen und Pfad ---
-    // Hilfsfunktion bleibt lokal oder wird ausgelagert
     const getTexturePath = (typeId: string, currentBehavior: FigureBehaviorState): string => {
         return `/assets/units/${typeId}/${currentBehavior}.png`;
     };
     const texturePath = useMemo(() => getTexturePath(unitTypeId, behavior), [unitTypeId, behavior]);
 
-    // Lade Textur *hier temporär*, nur um die Dimensionen zu bekommen.
-    // IDEAL: Dimensionen sollten Teil der unitData sein oder anders bezogen werden,
-    // um doppelten Ladevorgang (hier und in FigureSprite) zu vermeiden.
-    // Workaround: Wir laden sie hier, um Aspect Ratio zu berechnen.
+    // Temporäre Textur für Dimensionen (bestehender Workaround)
     // TODO: Refaktorieren, um Textur-Dimensionen aus unitData zu holen.
     const tempTexture = useTexture(texturePath);
     const aspectWidth = tempTexture?.image?.width ?? 1;
     const aspectHeight = tempTexture?.image?.height ?? 1;
     const spriteAspect = aspectWidth / aspectHeight;
-    const spriteHeight = 1.0 * modelScale;
+    const baseSpriteHeight = 1.0; // Standardhöhe für Skalierung 1.0
+    const spriteHeight = baseSpriteHeight * renderScale;
     const spriteWidth = spriteHeight * spriteAspect;
 
     // Klick-Handler
@@ -244,19 +248,16 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
         event.stopPropagation();
         console.log(`Figure clicked: ${figureId}`);
         setSelectedFigureId(figureId);
-    }, [figureId, setSelectedFigureId]); // Abhängigkeiten korrekt setzen
+    }, [figureId, setSelectedFigureId]);
 
     return (
-        // Leere Gruppe als Container, Key hier nicht mehr nötig, da in PlacedUnitMesh
         <group>
-            {/* Rendere die Sprite-Komponente mit allen notwendigen Props */}
             <FigureSprite
                 figureId={figureId}
                 unitTypeId={unitTypeId}
                 behavior={behavior}
                 attackCooldownEnd={attackCooldownEnd}
                 position={position}
-                modelScale={modelScale}
                 moveBobbingFrequency={moveBobbingFrequency}
                 moveBobbingAmplitude={moveBobbingAmplitude}
                 recoilDurationMs={recoilDurationMs}
@@ -269,7 +270,7 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
             />
             {/* Rendere HealthBar nur wenn nötig */}
             {currentHP < maxHP &&
-                 <group position={[position.x, spriteHeight + 0.1, position.z]}> {/* Positioniere relativ */}
+                 <group position={[position.x, spriteHeight + 0.1, position.z]}>
                     <HealthBar currentHP={currentHP} maxHP={maxHP} scale={spriteWidth * 0.8} />
                  </group>
             }
@@ -397,76 +398,86 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
         }
     }, [spriteTexture]);
 
-    // +++ NEU: useEffect zum Setzen der initialen/aktuellen Matrizen +++
+    // useEffect zum Setzen der initialen/aktuellen Matrizen (bleibt wichtig für Start/Reset)
     useEffect(() => {
         if (!meshRef.current || projectiles.length === 0) return;
 
-        // Holen der Kamera-Position für Billboard-Effekt (optional hier, aber konsistent)
-        // Man könnte auch eine feste Ausrichtung initial setzen, wenn die Kamera noch nicht bereit ist
-        // const cameraPosition = useThree().camera.position; // useThree() kann hier nicht direkt verwendet werden!
-        // Wir verwenden stattdessen die aktuelle Position vom Server für die initiale Platzierung.
-
         projectiles.forEach((projectile, i) => {
-            if (i >= meshRef.current!.count) return; // Sicherheitscheck
+            if (i >= meshRef.current!.count) return;
 
-            // Direkte Positionierung basierend auf projectile.currentPos
+            // Initialposition direkt vom Server setzen
             const currentX = projectile.currentPos.x;
-            // Verwende yOffset für die Höhe
-            const currentY = yOffset;
+            const currentY = projectile.currentPos.y; // Y vom Server für Initialisierung
             const currentZ = projectile.currentPos.z;
 
             dummyObject.position.set(currentX, currentY, currentZ);
-
-            // Billboard-Effekt optional schon hier anwenden?
-            // Fürs Erste lassen wir es, useFrame kümmert sich darum.
-            // dummyObject.lookAt(cameraPosition);
-
-            // Matrix aktualisieren und direkt setzen
             dummyObject.updateMatrix();
             meshRef.current!.setMatrixAt(i, dummyObject.matrix);
         });
 
-        // Wichtig: Flag setzen, damit Three.js die Änderungen übernimmt
         meshRef.current.instanceMatrix.needsUpdate = true;
 
-    }, [projectiles, spriteWidth, spriteHeight, yOffset]); // Abhängigkeiten: Projektile und Geometrie/Offset
+    }, [projectiles, spriteWidth, spriteHeight]); 
 
-    // --- Instanz-Updates (jetzt in useFrame) ---
+    // --- Instanz-Updates (jetzt in useFrame mit Client-Simulation) ---
     useFrame((state, delta) => {
         if (!meshRef.current || projectiles.length === 0) return;
 
-        // Holen der Kamera-Position für Billboard-Effekt
         const cameraPosition = state.camera.position;
+        const now = Date.now(); // Aktuelle Client-Zeit
 
         projectiles.forEach((projectile, i) => {
-            // Sicherheitscheck: Index muss im gültigen Bereich des InstancedMesh liegen
             if (i >= meshRef.current!.count) return;
             
-            // Holen der letzten Matrix und Position
-            meshRef.current!.getMatrixAt(i, dummyObject.matrix); 
-            dummyObject.position.setFromMatrixPosition(dummyObject.matrix);
+            // Holen der letzten Matrix ist nicht mehr nötig für Positionsberechnung,
+            // aber wir überschreiben sie ja eh.
+            // meshRef.current!.getMatrixAt(i, dummyObject.matrix); 
+            // dummyObject.position.setFromMatrixPosition(dummyObject.matrix);
             
-            // Ziel ist die aktuelle Position vom Server
-            // WICHTIG: Die yOffset muss hier angewendet werden!
-            const targetX = projectile.currentPos.x;
-            const targetY = yOffset; // Ziel-Y ist der Offset
-            const targetZ = projectile.currentPos.z;
+            let finalX: number, finalY: number, finalZ: number;
 
-            // Interpolieren zur Zielposition
-            // Wir verwenden einen temporären Vektor, um das Ziel zu setzen
-            // +++ NEU: Wiederverwendeten Vektor nutzen +++
-            targetPositionVec.set(targetX, targetY, targetZ);
-            dummyObject.position.lerp(targetPositionVec, 0.3); // Behalte LERP für Glättung
+            // Unterscheide Logik basierend auf Projektiltyp
+            if (projectile.projectileType === 'ballistic') {
+                // Client-seitige Simulation der ballistischen Flugbahn
+                const clientElapsedTime = (now - projectile.createdAt) / 1000.0;
+                const progress = Math.min(1.0, clientElapsedTime / projectile.totalFlightTime);
 
-            // Billboard-Effekt: Richte Instanz zur Kamera aus
+                finalX = lerp(projectile.originPos.x, projectile.targetPos.x, progress);
+                finalZ = lerp(projectile.originPos.z, projectile.targetPos.z, progress);
+                // Verwende die client-seitige Höhenberechnung
+                finalY = calculateParabolicHeight(progress, MAX_PROJECTILE_ARC_HEIGHT);
+                
+            } else { // 'targeted' oder unbekannt (Fallback: Interpolation zur Server-Position)
+                // Ziel ist die aktuelle Position vom Server
+                const targetX = projectile.currentPos.x;
+                // Für gezielte Projektile nehmen wir Y vom Server (sollte meist 0 sein oder feste Höhe)
+                const targetY = projectile.currentPos.y;
+                const targetZ = projectile.currentPos.z;
+
+                // Holen der aktuellen Position aus der Matrix für LERP
+                meshRef.current!.getMatrixAt(i, dummyObject.matrix); 
+                dummyObject.position.setFromMatrixPosition(dummyObject.matrix);
+
+                targetPositionVec.set(targetX, targetY, targetZ);
+                dummyObject.position.lerp(targetPositionVec, 0.3); // Interpoliere zur Server-Position
+
+                // Die interpolierte Position verwenden
+                finalX = dummyObject.position.x;
+                finalY = dummyObject.position.y;
+                finalZ = dummyObject.position.z;
+            }
+
+            // Setze die berechnete/interpolierte Position
+            dummyObject.position.set(finalX, finalY, finalZ);
+
+            // Billboard-Effekt (bleibt gleich)
             dummyObject.lookAt(cameraPosition);
 
-            // Matrix aktualisieren
+            // Matrix aktualisieren & setzen
             dummyObject.updateMatrix();
             meshRef.current!.setMatrixAt(i, dummyObject.matrix);
         });
 
-        // Wichtig: Flag setzen, damit Three.js die Änderungen übernimmt
         meshRef.current.instanceMatrix.needsUpdate = true;
     });
 

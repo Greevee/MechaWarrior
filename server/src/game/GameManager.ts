@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { GameState, PlayerInGame, PlacedUnit, FigureState, ProjectileState, FigureBehaviorState, GamePhase } from '../types/game.types';
 import { Lobby, LobbyPlayer } from '../types/lobby.types';
 import { Unit, placeholderUnits, parseFormation } from '../units/unit.types';
+import { Faction } from "../types/common.types";
+import { GameMode } from "../types/lobby.types";
 
 const TICK_INTERVAL_MS = 50; // 40 Ticks pro Sekunde
 const preparationDurationMs = 60 * 1000; // 60 Sekunden
@@ -21,12 +23,28 @@ const gridMaxX = Math.floor((GRID_WIDTH - 1) / 2);
 const gridMinZ = 0;
 const gridMaxZ = TOTAL_DEPTH - 1;
 
+// Konstanten
+const PREPARATION_TIME_SECONDS = 10; // z.B. 30 Sekunden Vorbereitungszeit
+const ROUND_INTERVAL_SECONDS = 5; // Zeit zwischen den Runden
+const MAX_PROJECTILE_ARC_HEIGHT = 5; // Maximale Höhe des Bogens für ballistische Projektile
+
+// Hilfsfunktion: Lineare Interpolation
+const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
+
+// NEU: Hilfsfunktion für Parabelhöhe (0 <= t <= 1)
+const calculateParabolicHeight = (t: number, maxHeight: number): number => {
+    // Einfache Parabelformel: y = 4 * h * t * (1 - t)
+    // t=0 -> y=0; t=0.5 -> y=h; t=1 -> y=0
+    return 4 * maxHeight * t * (1 - t);
+};
+
 export class GameManager {
     private activeGames = new Map<string, GameState>();
     private preparationTimers = new Map<string, NodeJS.Timeout>();
     private gameLoopInterval: NodeJS.Timeout | null = null;
     private io: SocketIOServer;
     private playerSockets = new Map<number, string>();
+    private lastUpdateTime: number = Date.now();
 
     constructor(io: SocketIOServer) {
         this.io = io;
@@ -376,7 +394,9 @@ export class GameManager {
     // Kollisionslogik und Kampftick
     private updateCombatState(gameId: string, deltaTimeSeconds: number): void {
         const gameState = this.activeGames.get(gameId);
-        if (!gameState || gameState.phase !== 'Combat') return; // Double check
+        if (!gameState || gameState.phase !== 'Combat') {
+             return; // Double check
+        }
 
         let unitsChanged = false;
         let projectilesChanged = false;
@@ -392,63 +412,142 @@ export class GameManager {
                 });
             });
         });
-        if (figureMap.size === 0) return; // Kein Kampf mehr möglich?
+        // if (figureMap.size === 0) return; // Kein Kampf mehr möglich? <-- Temporär auskommentiert, falls das Probleme macht
 
         // 1.5 Projektile aktualisieren
         if (!gameState.activeProjectiles) gameState.activeProjectiles = [];
+
         const remainingProjectiles: ProjectileState[] = [];
         gameState.activeProjectiles.forEach(p => {
-            const travelTime = (now - p.createdAt) / 1000.0;
-            const totalDist = Math.sqrt(this.calculateDistanceSq(p.originPos, p.targetPos));
-            const distCovered = p.speed * travelTime;
+            const elapsedTime = (now - p.createdAt) / 1000.0; // Zeit seit Erstellung in Sekunden
 
-            if (distCovered >= totalDist) { // Treffer!
+            // --- Ballistic Projectile Logic ---            
+            if (p.projectileType === 'ballistic') {
+                const progress = Math.min(1.0, elapsedTime / p.totalFlightTime);
+
+                // Position aktualisieren (X, Z linear; Y parabolisch) - Korrigierte Logik
+                p.currentPos.x = lerp(p.originPos.x, p.targetPos.x, progress);
+                p.currentPos.z = lerp(p.originPos.z, p.targetPos.z, progress);
+                p.currentPos.y = calculateParabolicHeight(progress, MAX_PROJECTILE_ARC_HEIGHT);
                 projectilesChanged = true;
-                const target = figureMap.get(p.targetFigureId);
 
-                // Finde die Quell-Einheit für Statistiken
-                const sourceUnit = gameState.players.get(p.playerId)?.placedUnits.find(u => u.instanceId === p.sourceUnitInstanceId);
-
-                if (target) {
-                    const healthBeforeDamage = target.currentHP;
-                    target.currentHP -= p.damage; // Einfacher Schadensabzug
-                    unitsChanged = true;
-
-                    // NEU: Effektiven Schaden für Statistik berechnen (kein Overkill)
-                    const effectiveDamageDealt = Math.min(p.damage, healthBeforeDamage);
-
-                    // Statistik aktualisieren: Schaden (mit effektivem Schaden)
-                    if (sourceUnit) {
-                        sourceUnit.totalDamageDealt += effectiveDamageDealt; // Gesamt erhöhen
-                        sourceUnit.lastRoundDamageDealt += effectiveDamageDealt; // Letzte Runde erhöhen
-                    } else {
-                         console.warn(`GameManager: Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Schadensstatistik nicht finden.`);
-                    }
-
-                    if (target.currentHP <= 0 && healthBeforeDamage > 0) { // Nur zählen, wenn es *dieser* Treffer war
-                        figureMap.delete(target.figureId); // Aus Map entfernen bei Tod
-                        figuresRemoved = true;
-                        // Statistik aktualisieren: Kills
-                        if (sourceUnit) {
-                            sourceUnit.totalKills += 1; // Gesamt erhöhen
-                            sourceUnit.lastRoundKills += 1; // Letzte Runde erhöhen
-                        } else {
-                             console.warn(`GameManager: Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Kill-Statistik nicht finden.`);
+                // Einschlag prüfen
+                if (progress >= 1.0) {
+                    // Flächenschaden anwenden
+                    const sourceUnit = gameState.players.get(p.playerId)?.placedUnits.find(u => u.instanceId === p.sourceUnitInstanceId);
+                    figureMap.forEach(targetFigure => {
+                        if (targetFigure.currentHP > 0) {
+                             const distSq = this.calculateDistanceSq(p.targetPos, targetFigure.position);
+                             const distance = Math.sqrt(distSq);
+                             const isWithinRadius = distance <= p.splashRadius;
+                            
+                             if (isWithinRadius) {
+                                const hpBefore = targetFigure.currentHP;
+                                this.applyDamage(targetFigure, p.damage);
+                                const hpAfter = targetFigure.currentHP;
+                                
+                                // +++ Statistik: Schaden +++
+                                const effectiveDamageDealt = Math.min(p.damage, hpBefore);
+                                if (sourceUnit) {
+                                    sourceUnit.totalDamageDealt += effectiveDamageDealt;
+                                    sourceUnit.lastRoundDamageDealt += effectiveDamageDealt;
+                                } else {
+                                     console.warn(`[Game ${gameId}] (Ballistic Hit) Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Schaden nicht finden.`);
+                                }
+                                // +++ Ende Statistik: Schaden +++
+                                
+                                if (targetFigure.currentHP <= 0) {
+                                    // Optional: Hier könnte ein generisches "Figur zerstört" Log bleiben
+                                    // console.log(`[Game ${gameId}] Figur ${targetFigure.figureId} durch Splash zerstört!`);
+                                    figureMap.delete(targetFigure.figureId);
+                                    figuresRemoved = true;
+                                    // +++ Statistik: Kills +++
+                                    if (sourceUnit) {
+                                        sourceUnit.totalKills += 1;
+                                        sourceUnit.lastRoundKills += 1;
+                                    } else {
+                                        console.warn(`[Game ${gameId}] (Ballistic Kill) Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Kill nicht finden.`);
+                                    }
+                                    // +++ Ende Statistik: Kills +++
+                                } else {
+                                    unitsChanged = true;
+                                }
+                             }
                         }
-                    }
+                    });
                 } else {
-                    // Ziel schon weg? Könnte passieren.
+                    remainingProjectiles.push(p); // Weiterfliegen
                 }
-            } else { // Weiterfliegen
-                projectilesChanged = true;
-                const ratio = distCovered / totalDist;
-                p.currentPos.x = p.originPos.x + (p.targetPos.x - p.originPos.x) * ratio;
-                p.currentPos.z = p.originPos.z + (p.targetPos.z - p.originPos.z) * ratio;
-                remainingProjectiles.push(p);
+
+            // --- Targeted Projectile Logic (Wiederhergestellt) ---    
+            } else {
+                const unitData = placeholderUnits.find(u => u.id === p.unitTypeId);
+                if (!unitData) { 
+                     return; 
+                }
+
+                const speed = p.speed;
+                const travelDist = speed * deltaTimeSeconds; // Bewegung basiert auf Delta-Time
+                const targetFigure = figureMap.get(p.targetFigureId);
+
+                // Zielposition (Position beim Abfeuern)
+                const targetPosition = p.targetPos; 
+
+                const dirX = targetPosition.x - p.currentPos.x;
+                const dirZ = targetPosition.z - p.currentPos.z;
+                const distToTargetSq = dirX * dirX + dirZ * dirZ;
+                const distToTarget = Math.sqrt(distToTargetSq);
+
+                if (distToTarget <= travelDist) {
+                    // Treffer!
+                    projectilesChanged = true; // Projektil wird entfernt
+                    
+                    // Finde Quell-Einheit für Statistiken
+                    const sourceUnit = gameState.players.get(p.playerId)?.placedUnits.find(u => u.instanceId === p.sourceUnitInstanceId);
+                    
+                    if (targetFigure && targetFigure.currentHP > 0) {
+                        const healthBeforeDamage = targetFigure.currentHP;
+                        this.applyDamage(targetFigure, p.damage);
+                        unitsChanged = true;
+                        // +++ Statistik: Schaden +++
+                        const effectiveDamageDealt = Math.min(p.damage, healthBeforeDamage);
+                        if (sourceUnit) {
+                            sourceUnit.totalDamageDealt += effectiveDamageDealt;
+                            sourceUnit.lastRoundDamageDealt += effectiveDamageDealt;
+                        } else {
+                             console.warn(`[Game ${gameId}] (Targeted Hit) Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Schaden nicht finden.`);
+                        }
+                        // +++ Ende Statistik: Schaden +++
+                        console.log(`[Game ${gameId}] Targeted Projektil ${p.projectileId} trifft ${targetFigure.figureId} (HP: ${healthBeforeDamage} -> ${targetFigure.currentHP})`);
+                        if (targetFigure.currentHP <= 0) {
+                             console.log(`......Figur ${targetFigure.figureId} zerstört! (targeted)`);
+                            figureMap.delete(targetFigure.figureId);
+                            figuresRemoved = true;
+                            // +++ Statistik: Kills +++
+                            if (sourceUnit) {
+                                sourceUnit.totalKills += 1;
+                                sourceUnit.lastRoundKills += 1;
+                            } else {
+                                 console.warn(`[Game ${gameId}] (Targeted Kill) Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Kill nicht finden.`);
+                            }
+                            // +++ Ende Statistik: Kills +++
+                        }
+                    } 
+                    // Kein else, Projektil verschwindet einfach, wenn Ziel weg ist
+                } else {
+                    // Weiterfliegen
+                    projectilesChanged = true;
+                    const moveX = (dirX / distToTarget) * travelDist;
+                    const moveZ = (dirZ / distToTarget) * travelDist;
+                    p.currentPos.x += moveX;
+                    p.currentPos.z += moveZ;
+                    p.currentPos.y = 0; // Targeted fliegen auf Y=0
+                    remainingProjectiles.push(p);
+                }
             }
         });
         gameState.activeProjectiles = remainingProjectiles;
-        
+
         // 2. Figuren Aktionen planen (Zielsuche, Bewegung, Angriff)
         const nextPositions = new Map<string, { x: number; z: number }>();
         figureMap.forEach(figure => {
@@ -495,23 +594,45 @@ export class GameManager {
                      figure.behavior = 'attacking';
                      // Angriff auslösen (Projektil erstellen)
                      if (now >= figure.attackCooldownEnd) {
-                         const bulletSpeed = unitData.bulletSpeed ?? 10;
-                         const newProjectile: ProjectileState = { 
-                             projectileId: uuidv4(), 
-                             playerId: figure.playerId, 
-                             unitTypeId: figure.unitTypeId, 
+                         const projectileType = unitData.projectileType;
+                         const dist = Math.sqrt(this.calculateDistanceSq(figure.position, target.position));
+                         
+                         // Flugzeit berechnen
+                         let totalFlightTime = 1.0; // Standardwert, falls etwas schiefgeht
+                         let bulletSpeed = unitData.bulletSpeed; // Hole die definierte Geschwindigkeit
+
+                         // Prüfe, ob bulletSpeed definiert und positiv ist
+                         if (!bulletSpeed || bulletSpeed <= 0) {
+                              console.warn(`[Game ${gameId}] WARNUNG: Unit ${unitData.id} (Typ: ${projectileType}) hat keine gültige bulletSpeed (${bulletSpeed}) definiert! Fallback auf 1s Flugzeit.`);
+                              bulletSpeed = dist; // Setze bulletSpeed auf Distanz, um 1s Flugzeit zu erzielen
+                              totalFlightTime = 1.0;
+                         } else {
+                              // Berechne Flugzeit basierend auf Distanz und definierter Geschwindigkeit
+                              totalFlightTime = dist / bulletSpeed; 
+                         }
+                         
+                         totalFlightTime = Math.max(0.1, totalFlightTime); // Mindestflugzeit erzwingen
+
+                         const newProjectile: ProjectileState = {
+                             projectileId: uuidv4(),
+                             playerId: figure.playerId,
+                             unitTypeId: figure.unitTypeId,
                              sourceUnitInstanceId: figure.unitInstanceId,
-                             damage: unitData.damage, 
-                             speed: bulletSpeed, 
-                             originPos: { ...figure.position }, 
-                             targetPos: { ...target.position }, 
-                             currentPos: { ...figure.position }, 
-                             targetFigureId: target.figureId, 
-                             createdAt: now 
+                             damage: unitData.damage,
+                             projectileType: projectileType,
+                             speed: bulletSpeed, // Verwende die ermittelte/korrigierte bulletSpeed
+                             splashRadius: unitData.splashRadius, // Vom Unit übernehmen
+                             originPos: { ...figure.position },
+                             targetPos: { ...target.position }, // Zielposition beim Feuern merken
+                             currentPos: { x: figure.position.x, y: 0, z: figure.position.z }, // Explizit Y=0 setzen
+                             targetFigureId: target.figureId,
+                             createdAt: now,
+                             totalFlightTime: totalFlightTime, // Berechnete Flugzeit
                          };
                          gameState.activeProjectiles.push(newProjectile);
                          projectilesChanged = true;
                          figure.attackCooldownEnd = now + (1000 / unitData.attackSpeed);
+                         unitsChanged = true; // Wegen Cooldown-Änderung
                      }
                  } else { // Außerhalb -> Bewegen
                       if (figure.behavior !== 'moving') unitsChanged = true;
@@ -827,5 +948,13 @@ export class GameManager {
         const dx = pos1.x - pos2.x;
         const dz = pos1.z - pos2.z;
         return dx * dx + dz * dz;
+    }
+
+    private applyDamage(figure: FigureState, damage: number): void {
+        figure.currentHP -= damage;
+        if (figure.currentHP <= 0) {
+            figure.currentHP = 0;
+            console.log(`GameManager: Figur ${figure.figureId} zerstört!`);
+        }
     }
 } 

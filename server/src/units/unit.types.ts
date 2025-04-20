@@ -22,7 +22,6 @@ export interface Unit {
   bulletSpeed?: number; // NEU: Geschwindigkeit der Geschosse (optional)
   impactEffectImage?: boolean; // NEU: Zeigt an, ob ein Standard-Aufprall-Effekt verwendet wird (assets/units/<id>/impact/impact.png)
   collisionRange?: number; // NEU: Radius für Kollisionserkennung (optional)
-  modelScale?: number; // NEU: Skalierungsfaktor für das 3D-Modell (optional)
   formation: string;    // e.g., "5x2", "3x3", "1x1"
   placementSpread?: number; // NEU: Zufällige Platzierungsabweichung (Radius)
   recoilDurationMs?: number;
@@ -33,16 +32,20 @@ export interface Unit {
 
   // NEU: Projektil Rendering Konfiguration
   projectileRenderType: 'image' | 'computer'; // Wie wird das Projektil gerendert?
+  projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
 
   // Optional: Nur relevant wenn projectileRenderType === 'computer'
   projectileColor?: string;
   projectileLineWidth?: number;
   projectileTrailLength?: number; // Länge des Linien-Tracers
   projectileOffsetY?: number;     // Y-Offset der Linie über dem Boden
-  projectileForwardOffset?: number; // Start-Offset der Linie vor der Einheit
+  projectileForwardOffset?: number; // Offset der Linie vor dem Ziel
 
-  // NEU: Optional: Nur relevant wenn projectileRenderType === 'image'
-  projectileImageScale?: number; // Skalierungsfaktor für das Projektil-Sprite (1 = 100%)
+  // Optional: Nur relevant wenn projectileRenderType === 'image'
+  projectileImageScale?: number; // Skalierung des Projektil-Sprites
+
+  // NEU: Visuelle Skalierung der Einheit selbst
+  renderScale?: number; // Multiplikator für die Standard-Sprite-Größe (1 = 100%)
 }
 
 export const placeholderUnits: Unit[] = [
@@ -67,16 +70,16 @@ export const placeholderUnits: Unit[] = [
     speed: 1,
     bulletSpeed: 30,
     collisionRange: 0.2,
-    modelScale: 0.5,
+    renderScale: 0.5,
     formation: '5x3',
     placementSpread: 0.1,
     recoilDurationMs: 150,
     recoilDistance: 0.1,
-    moveBobbingFrequency: 2, // Beispielwert: 2 Sprünge pro Sekunde
-    moveBobbingAmplitude: 0.05, // Beispielwert: Kleine Höhe
-    // NEU: Projektil Rendering
+    moveBobbingFrequency: 2,
+    moveBobbingAmplitude: 0.05,
     projectileRenderType: 'computer',
-    projectileColor: '#ebd686', // Das helle Gelb von vorher
+    projectileType: 'targeted',
+    projectileColor: '#ebd686',
     projectileLineWidth: 1,
     projectileTrailLength: 0.3,
     projectileOffsetY: 0.5,
@@ -104,16 +107,47 @@ export const placeholderUnits: Unit[] = [
     bulletSpeed: 15,
     impactEffectImage: true,
     collisionRange: 0.5,
-    modelScale: 1.2,
+    renderScale: 1.2,
     formation: '5x1',
     placementSpread: 0.2,
     recoilDurationMs: 250,
     recoilDistance: 0.25,
-    moveBobbingFrequency: 0.5, // Panzer hüpft langsamer
-    moveBobbingAmplitude: 0.02, // Panzer hüpft weniger hoch
-    // NEU: Projektil Rendering (zurück zu 'image')
+    moveBobbingFrequency: 0.5,
+    moveBobbingAmplitude: 0.02,
     projectileRenderType: 'image',
-    projectileImageScale: 0.5 // NEU: Projektil-Sprite auf 50% Größe skalieren
+    projectileType: 'targeted',
+    projectileImageScale: 0.5
+  },
+  {
+    id: 'human_catapult',
+    name: 'Katapult',
+    faction: 'Human',
+    width: 3,
+    height: 3,
+    squadSize: 1,
+    damage: 5000,
+    attackSpeed: 0.2,
+    splashRadius: 1.0,
+    range: 12,
+    bulletSpeed: 10,
+    hp: 12000,
+    armor: 0.1,
+    damageReduction: 0,
+    shield: 0,
+    placementCost: 300,
+    unlockCost: 100,
+    icon: 'human_catapult_icon',
+    speed: 0.6,
+    impactEffectImage: true,
+    collisionRange: 0.6,
+    renderScale: 3,
+    formation: '1x1',
+    placementSpread: 0,
+    projectileRenderType: 'image',
+    projectileType: 'ballistic',
+    projectileImageScale: 1,
+    moveBobbingFrequency: 1,
+    moveBobbingAmplitude: 0.05
   }
 ];
 
