@@ -56,6 +56,13 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
     const [yOffset, setYOffset] = useState(0);
     const facingScaleX = useRef(1); // Ref für die horizontale Ausrichtung (1 = rechts, -1 = links)
     const { setSelectedFigureId } = useGameStore(); // NEU: Setter für FigureId holen
+    const prevBehaviorRef = useRef<FigureBehaviorState>(figureData.behavior); // Vorheriges Verhalten speichern
+    // NEU: Ref für vorherigen Cooldown-Wert
+    const prevAttackCooldownEndRef = useRef<number>(figureData.attackCooldownEnd);
+
+    // NEU: Ref für Rückstoß-Animation
+    const recoilStartTime = useRef<number | null>(null);
+    const recoilOffsetX = useRef(0); // NEU: Ref für den Offset, um Linter-Fehler zu beheben
 
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === figureData.unitTypeId), [figureData.unitTypeId]);
     const modelScale = unitData?.modelScale ?? 1;
@@ -101,9 +108,40 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
         setYOffset(spriteHeight / 2);
     }, [spriteHeight]);
 
+    // NEU: Effekt zum Starten der Rückstoßanimation - JETZT BASIEREND AUF COOLDOWN
+    useEffect(() => {
+        // Nur auslösen, wenn sich der Cooldown geändert hat UND die Figur angreift
+        if (figureData.attackCooldownEnd !== prevAttackCooldownEndRef.current && 
+            figureData.behavior === 'attacking') {
+            recoilStartTime.current = Date.now();
+            // console.log(`Figure ${figureData.figureId} starts recoil (cooldown change)`);
+        }
+        // Aktuellen Cooldown für den nächsten Vergleich speichern
+        prevAttackCooldownEndRef.current = figureData.attackCooldownEnd;
+        // Aktuelles Verhalten für den nächsten Vergleich speichern (optional, kann aber bleiben)
+        prevBehaviorRef.current = figureData.behavior;
+    }, [figureData.attackCooldownEnd, figureData.behavior, figureData.figureId]); // Abhängigkeiten aktualisiert
+
     useFrame((state, delta) => {
-        // Zielposition inkl. dynamischem Y-Offset
-        targetPosition.set(figureData.position.x, yOffset, figureData.position.z);
+        // --- NEU: Hüpf-Offset Berechnung ---
+        let bobbingOffsetY = 0;
+        if (figureData.behavior === 'moving') {
+            const frequency = unitData?.moveBobbingFrequency ?? 0; // Standard: Kein Hüpfen
+            const amplitude = unitData?.moveBobbingAmplitude ?? 0; // Standard: Kein Hüpfen
+
+            if (frequency > 0 && amplitude > 0) {
+                // state.clock.elapsedTime gibt die seit Start vergangene Zeit in Sekunden
+                bobbingOffsetY = Math.sin(state.clock.elapsedTime * frequency * 2 * Math.PI) * amplitude;
+            }
+        }
+
+        // --- Zielposition Berechnung (inkl. Standard-Y-Offset und Hüpfen) ---
+        // Der Standard-Y-Offset (halbe Sprite-Höhe) wird immer angewendet
+        // Der bobbingOffsetY wird nur bei Bewegung hinzugefügt
+        const finalTargetY = yOffset + bobbingOffsetY;
+        targetPosition.set(figureData.position.x, finalTargetY, figureData.position.z);
+
+        // --- Positionsinterpolation (bleibt gleich, zielt jetzt auf finalTargetY) ---
         interpolatedPosition.current.lerp(targetPosition, 0.1);
         
         const movementDirection = interpolatedPosition.current.clone().sub(lastPosition.current);
@@ -128,12 +166,38 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
             }
         // Priorität 3: Ansonsten (moving oder idle außerhalb von Preparation) basierend auf Bewegung
         } else {
+            // NUR Richtung ändern, wenn Bewegung über dem Schwellenwert liegt
             if (movementDirection.z < -moveThreshold) {
                 facingScaleX.current = -1; // Nach -Z bewegen
             } else if (movementDirection.z > moveThreshold) {
                 facingScaleX.current = 1; // Nach +Z bewegen
             }
-            // Bei sehr kleiner Bewegung: Richtung beibehalten
+            // WENN Bewegung unter dem Schwellenwert liegt, wird facingScaleX.current NICHT geändert
+            // und behält seinen vorherigen Wert bei.
+        }
+
+        // --- NEU: Rückstoß-Offset Berechnung ---
+        if (recoilStartTime.current !== null) {
+            // Werte aus unitData holen oder Standardwerte verwenden
+            const recoilDuration = unitData?.recoilDurationMs ?? 150; // Standard: 150ms
+            const recoilDistance = unitData?.recoilDistance ?? 0.15; // Standard: 0.15
+
+            const elapsedTime = Date.now() - recoilStartTime.current;
+            if (elapsedTime < recoilDuration) {
+                // Einfache Sinus-Halbwelle für einen weichen Ein-/Ausstieg
+                const progress = elapsedTime / recoilDuration;
+                const recoilAmount = Math.sin(progress * Math.PI) * recoilDistance;
+                // Richtung ist entgegengesetzt zur Blickrichtung (facingScaleX)
+                recoilOffsetX.current = -facingScaleX.current * recoilAmount; // Wert in Ref speichern
+            } else {
+                // Animation beendet, Zeit zurücksetzen
+                recoilStartTime.current = null;
+                recoilOffsetX.current = 0; // Offset zurücksetzen
+                // console.log(`Figure ${figureData.figureId} ends recoil`);
+            }
+        } else {
+            // Sicherstellen, dass der Offset 0 ist, wenn keine Animation läuft
+            recoilOffsetX.current = 0;
         }
 
         if (meshRef.current) {
@@ -162,7 +226,11 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
         <group ref={meshRef} key={figureData.figureId} onClick={handleClick}>
             <Billboard>             
                  {/* Original Sprite-Plane */}
-                 <Plane args={[spriteWidth, spriteHeight]} scale={[facingScaleX.current, 1, 1]}>
+                 <Plane 
+                    args={[spriteWidth, spriteHeight]} 
+                    scale={[facingScaleX.current, 1, 1]}
+                    position={[recoilOffsetX.current, 0, 0]} // Horizontaler Offset für Rückstoß (Wert aus Ref lesen)
+                >
                       <meshBasicMaterial
                          color="white" // Explizit auf Weiß setzen
                          map={spriteTexture} // Verwende die dynamisch geladene Textur

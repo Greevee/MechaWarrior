@@ -25,6 +25,11 @@ export interface Unit {
   modelScale?: number; // NEU: Skalierungsfaktor für das 3D-Modell (optional)
   formation: string;    // e.g., "5x2", "3x3", "1x1"
   placementSpread?: number; // NEU: Zufällige Platzierungsabweichung (Radius)
+  recoilDurationMs?: number;
+  recoilDistance?: number;
+  // NEU: Hüpf-Animation beim Bewegen
+  moveBobbingFrequency?: number; // Wie oft pro Sekunde
+  moveBobbingAmplitude?: number; // Wie hoch der Sprung ist
 }
 
 export const placeholderUnits: Unit[] = [
@@ -51,7 +56,11 @@ export const placeholderUnits: Unit[] = [
     collisionRange: 0.2,
     modelScale: 0.5,
     formation: '5x3',
-    placementSpread: 0.1
+    placementSpread: 0.1,
+    recoilDurationMs: 150,
+    recoilDistance: 0.1,
+    moveBobbingFrequency: 2, // Beispielwert: 2 Sprünge pro Sekunde
+    moveBobbingAmplitude: 0.05 // Beispielwert: Kleine Höhe
   },
   {
     id: 'human_small_tank',
@@ -72,12 +81,16 @@ export const placeholderUnits: Unit[] = [
     unlockCost: 0,
     icon: 'human_small_tank_icon',
     speed: 1.5,
-    bulletSpeed: 20,
+    bulletSpeed: 15,
     collisionRange: 0.5,
     modelScale: 1.2,
     formation: '5x1',
     placementSpread: 0.2,
-    impactEffectImage: true
+    impactEffectImage: true,
+    recoilDurationMs: 250,
+    recoilDistance: 0.25,
+    moveBobbingFrequency: 0.5, // Panzer hüpft langsamer
+    moveBobbingAmplitude: 0.02 // Panzer hüpft weniger hoch
   }
 ];
 

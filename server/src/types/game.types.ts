@@ -22,6 +22,7 @@ export interface ProjectileState {
     projectileId: string;
     playerId: number;       // Spieler, der geschossen hat
     unitTypeId: string;     // Einheitentyp (für Schaden etc.)
+    sourceUnitInstanceId: string; // NEU: Welche Instanz hat geschossen?
     damage: number;         // Schaden des Projektils
     speed: number;          // Fluggeschwindigkeit
     originPos: { x: number; z: number }; // Startpunkt
@@ -31,7 +32,7 @@ export interface ProjectileState {
     createdAt: number;      // Zeitstempel der Erstellung (ms)
 }
 
-// Struktur für eine platzierte Einheit (enthält jetzt Figuren)
+// Struktur für eine platzierte Einheit (Server-Version)
 export interface PlacedUnit {
     instanceId: string; // Eindeutige ID für diese spezifische Instanz auf dem Feld
     unitId: string;     // ID des Einheitentyps (z.B. 'human_infantry')
@@ -41,9 +42,14 @@ export interface PlacedUnit {
     initialPosition: { x: number; z: number }; 
     rotation: 0 | 90; // NEU: Rotation der Einheit (0 oder 90 Grad)
     figures: FigureState[]; // Array der Figuren dieser Einheit
+    // NEU: Erweiterte Statistik-Felder
+    totalDamageDealt: number;
+    totalKills: number;
+    lastRoundDamageDealt: number;
+    lastRoundKills: number;
 }
 
-// Zustand eines einzelnen Spielers innerhalb eines Spiels
+// Zustand eines einzelnen Spielers innerhalb eines Spiels (Server-Version)
 export interface PlayerInGame {
     id: number;
     username: string;

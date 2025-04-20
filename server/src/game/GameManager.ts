@@ -4,10 +4,10 @@ import { GameState, PlayerInGame, PlacedUnit, FigureState, ProjectileState, Figu
 import { Lobby, LobbyPlayer } from '../types/lobby.types';
 import { Unit, placeholderUnits, parseFormation } from '../units/unit.types';
 
-const TICK_INTERVAL_MS = 100; // 10 Ticks pro Sekunde
+const TICK_INTERVAL_MS = 25; // 40 Ticks pro Sekunde
 const preparationDurationMs = 60 * 1000; // 60 Sekunden
 const initialCredits = 200;
-const initialBaseHealth = 1000;
+const initialBaseHealth = 10000;
 const incomePerRound = 200; // Beispiel-Einkommen
 const PLACEMENT_LIMIT_PER_ROUND = 3;
 
@@ -225,6 +225,10 @@ export class GameManager {
             initialPosition: position,
             rotation: rotation,
             figures: figures,
+            totalDamageDealt: 0,
+            totalKills: 0,
+            lastRoundDamageDealt: 0,
+            lastRoundKills: 0
         };
         playerState.placedUnits.push(newPlacedUnit);
         console.log(`GameManager: Spieler ${playerState.username} platziert ${unitId} mit Rotation ${rotation}.`);
@@ -401,10 +405,39 @@ export class GameManager {
             if (distCovered >= totalDist) { // Treffer!
                 projectilesChanged = true;
                 const target = figureMap.get(p.targetFigureId);
+
+                // Finde die Quell-Einheit für Statistiken
+                const sourceUnit = gameState.players.get(p.playerId)?.placedUnits.find(u => u.instanceId === p.sourceUnitInstanceId);
+
                 if (target) {
+                    const healthBeforeDamage = target.currentHP;
                     target.currentHP -= p.damage; // Einfacher Schadensabzug
                     unitsChanged = true;
-                    if (target.currentHP <= 0) figureMap.delete(target.figureId); // Aus Map entfernen bei Tod
+
+                    // NEU: Effektiven Schaden für Statistik berechnen (kein Overkill)
+                    const effectiveDamageDealt = Math.min(p.damage, healthBeforeDamage);
+
+                    // Statistik aktualisieren: Schaden (mit effektivem Schaden)
+                    if (sourceUnit) {
+                        sourceUnit.totalDamageDealt += effectiveDamageDealt; // Gesamt erhöhen
+                        sourceUnit.lastRoundDamageDealt += effectiveDamageDealt; // Letzte Runde erhöhen
+                    } else {
+                         console.warn(`GameManager: Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Schadensstatistik nicht finden.`);
+                    }
+
+                    if (target.currentHP <= 0 && healthBeforeDamage > 0) { // Nur zählen, wenn es *dieser* Treffer war
+                        figureMap.delete(target.figureId); // Aus Map entfernen bei Tod
+                        figuresRemoved = true;
+                        // Statistik aktualisieren: Kills
+                        if (sourceUnit) {
+                            sourceUnit.totalKills += 1; // Gesamt erhöhen
+                            sourceUnit.lastRoundKills += 1; // Letzte Runde erhöhen
+                        } else {
+                             console.warn(`GameManager: Konnte Quell-Einheit ${p.sourceUnitInstanceId} für Kill-Statistik nicht finden.`);
+                        }
+                    }
+                } else {
+                    // Ziel schon weg? Könnte passieren.
                 }
             } else { // Weiterfliegen
                 projectilesChanged = true;
@@ -463,7 +496,19 @@ export class GameManager {
                      // Angriff auslösen (Projektil erstellen)
                      if (now >= figure.attackCooldownEnd) {
                          const bulletSpeed = unitData.bulletSpeed ?? 10;
-                         const newProjectile: ProjectileState = { projectileId: uuidv4(), playerId: figure.playerId, unitTypeId: figure.unitTypeId, damage: unitData.damage, speed: bulletSpeed, originPos: { ...figure.position }, targetPos: { ...target.position }, currentPos: { ...figure.position }, targetFigureId: target.figureId, createdAt: now };
+                         const newProjectile: ProjectileState = { 
+                             projectileId: uuidv4(), 
+                             playerId: figure.playerId, 
+                             unitTypeId: figure.unitTypeId, 
+                             sourceUnitInstanceId: figure.unitInstanceId,
+                             damage: unitData.damage, 
+                             speed: bulletSpeed, 
+                             originPos: { ...figure.position }, 
+                             targetPos: { ...target.position }, 
+                             currentPos: { ...figure.position }, 
+                             targetFigureId: target.figureId, 
+                             createdAt: now 
+                         };
                          gameState.activeProjectiles.push(newProjectile);
                          projectilesChanged = true;
                          figure.attackCooldownEnd = now + (1000 / unitData.attackSpeed);
@@ -635,22 +680,37 @@ export class GameManager {
         gameState.players.forEach(player => {
             player.credits += incomePerRound * (gameState.round - 1); // Einkommen für vergangene Runde
             player.unitsPlacedThisRound = 0;
-            // Einheiten auf Startzustand zurücksetzen (kopiert gespeicherten Zustand)
-            player.placedUnits = JSON.parse(JSON.stringify(player.unitsAtCombatStart || []));
+            
+            const survivingUnitsMap = new Map<string, PlacedUnit>(player.placedUnits.map(u => [u.instanceId, u]));
+            const nextRoundPlacedUnits: PlacedUnit[] = [];
 
-            // Figurenpositionen und HP basierend auf der *gespeicherten* Rotation zurücksetzen
-            player.placedUnits.forEach(unit => {
-                const unitData = placeholderUnits.find(ud => ud.id === unit.unitId);
-                if (!unitData) return;
+            (player.unitsAtCombatStart || []).forEach(unitToRestore => {
+                const survivor = survivingUnitsMap.get(unitToRestore.instanceId);
+                const newUnit: PlacedUnit = JSON.parse(JSON.stringify(unitToRestore)); // Deep copy
 
-                // Verwende die gespeicherte Rotation der Einheit!
-                const rotation = unit.rotation; 
+                // Übertrage Gesamt-Stats vom Überlebenden (falls vorhanden), sonst 0
+                newUnit.totalDamageDealt = survivor ? survivor.totalDamageDealt : 0;
+                newUnit.totalKills = survivor ? survivor.totalKills : 0;
+
+                // Setze Last-Round-Stats zurück
+                newUnit.lastRoundDamageDealt = 0;
+                newUnit.lastRoundKills = 0;
+
+                // --- Reset der Figuren innerhalb der newUnit ---
+                const unitData = placeholderUnits.find(ud => ud.id === newUnit.unitId);
+                if (!unitData) {
+                    console.warn(`GameManager Reset: Konnte UnitData für ${newUnit.unitId} nicht finden.`);
+                    return; // Einheit kann nicht korrekt zurückgesetzt werden
+                }
+                
+                const figures = newUnit.figures;
+                const rotation = newUnit.rotation; 
                 const effectiveWidth = rotation === 90 ? unitData.height : unitData.width;
                 const effectiveHeight = rotation === 90 ? unitData.width : unitData.height;
-
-                const figures = unit.figures;
                 const formationInfo = parseFormation(unitData.formation);
-                const useFormation = formationInfo && formationInfo.cols * formationInfo.rows >= figures.length;
+                // WICHTIG: Nutze die Figurenanazahl aus unitData, nicht die (potentiell reduzierte) aus unitToRestore
+                const targetFigureCount = unitData.squadSize; 
+                const useFormation = formationInfo && formationInfo.cols * formationInfo.rows >= targetFigureCount;
                 let cols = 1, rows = 1, spacingX = 1.0, spacingZ = 1.0;
 
                 if (useFormation && formationInfo) {
@@ -659,19 +719,37 @@ export class GameManager {
                     spacingX = effectiveWidth > 0 ? effectiveWidth / cols : 1.0;
                     spacingZ = effectiveHeight > 0 ? effectiveHeight / rows : 1.0;
                 } else {
-                    // Fallback-Berechnung (ähnlich wie in createFiguresForUnit)
-                     cols = Math.ceil(Math.sqrt(figures.length));
+                     cols = Math.ceil(Math.sqrt(targetFigureCount));
                     if (rotation === 90 && unitData.width > unitData.height) {
-                        cols = Math.ceil(figures.length / Math.floor(Math.sqrt(figures.length)));
+                        cols = Math.ceil(targetFigureCount / Math.floor(Math.sqrt(targetFigureCount)));
                     } else if (rotation === 0 && unitData.height > unitData.width) {
-                        cols = Math.ceil(figures.length / Math.floor(Math.sqrt(figures.length)));
+                        cols = Math.ceil(targetFigureCount / Math.floor(Math.sqrt(targetFigureCount)));
                     } 
-                    rows = Math.ceil(figures.length / cols);
+                    rows = Math.ceil(targetFigureCount / cols);
                     spacingX = effectiveWidth > 0 ? effectiveWidth / cols : 1.0;
                     spacingZ = effectiveHeight > 0 ? effectiveHeight / rows : 1.0;
                 }
                 const startOffsetX = -effectiveWidth / 2 + spacingX / 2;
                 const startOffsetZ = -effectiveHeight / 2 + spacingZ / 2;
+
+                // Stelle sicher, dass figures die korrekte Anzahl hat (falls Figuren gestorben sind)
+                while (figures.length < targetFigureCount) {
+                     // Füge eine neue Standardfigur hinzu (oder kopiere eine vorhandene Struktur)
+                     // Wichtig: Neue figureId generieren!
+                     figures.push({
+                        figureId: uuidv4(),
+                        unitInstanceId: newUnit.instanceId,
+                        playerId: player.id,
+                        unitTypeId: newUnit.unitId,
+                        position: { x: 0, z: 0 }, // Wird unten überschrieben
+                        currentHP: unitData.hp,
+                        behavior: 'idle',
+                        targetFigureId: null,
+                        attackCooldownEnd: 0
+                     });
+                }
+                 // Entferne überschüssige Figuren (sollte nicht passieren, aber sicher ist sicher)
+                figures.length = targetFigureCount; 
 
                 figures.forEach((figure, i) => {
                     figure.currentHP = unitData.hp;
@@ -682,12 +760,15 @@ export class GameManager {
                     const row = Math.floor(i / cols);
                     const offsetX = startOffsetX + col * spacingX;
                     const offsetZ = startOffsetZ + row * spacingZ;
-                    // Position relativ zur initialPosition der PlacedUnit setzen
-                    figure.position.x = unit.initialPosition.x + offsetX;
-                    figure.position.z = unit.initialPosition.z + offsetZ;
-                     // Hier wird *keine* zufällige Abweichung mehr angewendet, wir wollen den Zustand von Kampfbeginn wiederherstellen
+                    figure.position.x = newUnit.initialPosition.x + offsetX;
+                    figure.position.z = newUnit.initialPosition.z + offsetZ;
                 });
+                // --- Ende Reset der Figuren ---
+
+                nextRoundPlacedUnits.push(newUnit);
             });
+
+            player.placedUnits = nextRoundPlacedUnits; // Ersetze die alte Liste durch die neu erstellte
         });
 
         this.startPreparationTimer(gameId); // Neuen Timer starten

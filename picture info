@@ -1,3 +1,11 @@
 client/public/assets/units/human_infantry/idle.png
 client/public/assets/units/human_infantry/moving.png
 client/public/assets/units/human_infantry/attacking.png
+
+
+ToDO:
+knockback animation beim schießen
+Schussarten:
+penetration, beam, mortar, 
+
+airunits

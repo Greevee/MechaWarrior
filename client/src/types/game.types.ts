@@ -28,6 +28,7 @@ export interface ProjectileState {
     projectileId: string;
     playerId: number;       
     unitTypeId: string;     
+    sourceUnitInstanceId: string; // NEU: Welche Instanz hat geschossen?
     damage: number;         
     speed: number;          
     originPos: { x: number; z: number }; 
@@ -45,6 +46,11 @@ export interface PlacedUnit {
     initialPosition: { x: number; z: number }; // Geändert von position
     rotation: 0 | 90; // NEU: Hinzugefügt (synchron mit Server)
     figures: FigureState[]; // Hinzugefügt
+    // NEU: Erweiterte Statistik-Felder
+    totalDamageDealt: number;
+    totalKills: number;
+    lastRoundDamageDealt: number;
+    lastRoundKills: number;
 }
 
 // Zustand eines einzelnen Spielers innerhalb eines Spiels (Client-Version)

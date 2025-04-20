@@ -242,6 +242,32 @@ const GameLoader: React.FC = () => {
         return uniquePaths;
     }, [gameState]); 
 
+    // NEU: Memoized Daten für die ausgewählte UNIT (basierend auf selectedFigureId)
+    const selectedPlacedUnitData = useMemo(() => {
+        if (!gameState || !selectedFigureId) return null;
+        let foundUnit: PlacedUnit | null = null;
+
+        for (const player of gameState.players) {
+            for (const unit of player.placedUnits) {
+                const figureExists = unit.figures.some(f => f.figureId === selectedFigureId);
+                if (figureExists) {
+                    foundUnit = unit;
+                    break;
+                }
+            }
+            if (foundUnit) break;
+        }
+
+        if (!foundUnit) return null;
+
+        const baseUnitData = placeholderUnits.find(u => u.id === foundUnit!.unitId);
+
+        return { 
+            unit: foundUnit,
+            baseData: baseUnitData
+        };
+    }, [gameState, selectedFigureId]);
+
     if (!gameState) {
         return <div>Warte auf initiale Spieldaten...</div>;
     }
@@ -309,13 +335,25 @@ const GameLoader: React.FC = () => {
                                 className="unit-details-icon" 
                                 onError={(e) => { e.currentTarget.src = '/assets/units/placeholder/figure_placeholder.png'; }} 
                             />
-                            <div className="unit-details-stats">
-                                <p>Besitzer: {selectedFigureData.ownerUsername}</p>
-                                <hr style={{borderColor: 'var(--hud-blue-transparent)'}}/>
-                                <p>HP: {selectedFigureData.figure.currentHP} / {selectedFigureData.baseData.hp}</p>
-                                <p>Schaden: {selectedFigureData.baseData.damage}</p>
-                                <p>Reichweite: {selectedFigureData.baseData.range}</p>
-                                <p>Geschw.: {selectedFigureData.baseData.speed}</p>
+                            {/* NEU: Zweispaltiges Layout für Stats */}
+                            <div className="unit-details-stats" style={{ display: 'flex', gap: '20px' }}> 
+                                {/* Spalte 1: Basiswerte */}
+                                <div className="stats-column">
+                                    <p>HP: {selectedFigureData.figure.currentHP} / {selectedFigureData.baseData.hp}</p>
+                                    <p>Schaden (Basis): {selectedFigureData.baseData.damage}</p>
+                                    <p>Reichweite: {selectedFigureData.baseData.range}</p>
+                                    <p>Geschw.: {selectedFigureData.baseData.speed}</p>
+                                </div>
+                                {/* Spalte 2: Runden-Statistiken */}
+                                {selectedPlacedUnitData && (
+                                    <div className="stats-column">
+                                        {/* <hr style={{borderColor: 'var(--hud-blue-transparent)'}}/> // Trennlinie hier nicht mehr nötig? */}
+                                        <p>Schaden (LR): {selectedPlacedUnitData.unit.lastRoundDamageDealt}</p>
+                                        <p>Schaden (Ges): {selectedPlacedUnitData.unit.totalDamageDealt}</p>
+                                        <p>Kills (LR): {selectedPlacedUnitData.unit.lastRoundKills}</p>
+                                        <p>Kills (Ges): {selectedPlacedUnitData.unit.totalKills}</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
