@@ -29,6 +29,8 @@ export interface ProjectileState {
     projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
     speed: number;          // Fluggeschwindigkeit (für 'targeted' relevant)
     splashRadius: number;   // NEU: Radius für Flächenschaden (vom Unit übernommen)
+    impactEffectImageScale?: number; // NEU: Skalierung für das Einschlagbild (falls impactEffectImage true ist)
+    impactEffectImagePath?: string;  // NEU: Pfad zum Einschlagbild (falls impactEffectImage true ist)
     originPos: { x: number; y: number; z: number }; // Startpunkt (inkl. Höhe)
     targetPos: { x: number; y: number; z: number }; // Zielpunkt (inkl. Höhe)
     currentPos: { x: number; y: number; z: number }; // Aktuelle Position (inkl. Höhe)

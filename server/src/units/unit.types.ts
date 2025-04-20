@@ -15,6 +15,7 @@ export interface Weapon {
   projectileType: 'targeted' | 'ballistic';
   impactEffectImage?: boolean; // Zeigt an, ob beim Einschlag ein Effekt gezeigt wird
   impactEffectImagePath?: string; // NEU: Pfad zum Impact-Effekt-Bild (wenn impactEffectImage true ist)
+  impactEffectImageScale?: number; // NEU: Skalierung für das Impact-Effekt-Bild (wenn impactEffectImage true ist, Default: 1)
 
   // Optional: Nur relevant wenn projectileRenderType === 'computer'
   projectileColor?: string;
@@ -115,7 +116,8 @@ export const catapultStone: Weapon = {
     impactEffectImage: true,
     impactEffectImagePath: 'weapons/impacts/weapon_catapult_stone_impact.png',
     projectileImagePath: 'weapons/projectiles/catapult_stone_projectile.png',
-    projectileImageScale: 1
+    projectileImageScale: 1,
+    impactEffectImageScale: 4
 };
 
 // NEU: Waffe für Moloch
@@ -126,7 +128,7 @@ export const molochCannon: Weapon = {
     splashRadius: 0.5, // Kleiner Splash
     range: 14, // Gute Reichweite
     canTargetAir: true, // Kann Boden & Luft
-    bulletSpeed: 18,
+    bulletSpeed: 5,
     recoilDurationMs: 300, // Deutlicher Rückstoß
     recoilDistance: 0.3,
     projectileRenderType: 'image', // Großes Projektil-Sprite?
@@ -134,7 +136,8 @@ export const molochCannon: Weapon = {
     impactEffectImage: true,
     impactEffectImagePath: 'weapons/impacts/weapon_moloch_cannon_impact.png',
     projectileImagePath: 'weapons/projectiles/moloch_cannon_projectile.png',
-    projectileImageScale: 1.2 // Großes Projektil
+    projectileImageScale: 1.2,// Großes Projektil
+    impactEffectImageScale: 2
 };
 
 // Optional: Eine Sammlung aller Waffen für einfachen Zugriff?

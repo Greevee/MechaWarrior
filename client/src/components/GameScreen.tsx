@@ -705,6 +705,7 @@ interface ImpactEffectProps {
     impactTexturePath: string; // NEU: Erforderlicher Pfad zur Textur
     onComplete: (id: string) => void; // Callback zum Entfernen
     duration?: number; // Dauer des Effekts in Sekunden
+    scale?: number; // NEU: Skalierungsfaktor für das Sprite
 }
 
 const ImpactEffect: React.FC<ImpactEffectProps> = ({ 
@@ -713,7 +714,8 @@ const ImpactEffect: React.FC<ImpactEffectProps> = ({
     // unitTypeId, // Entfernt
     impactTexturePath, // NEU
     onComplete, 
-    duration = 1.0 // Dauer jetzt 1 Sekunde
+    duration = 1.0, // Dauer jetzt 1 Sekunde
+    scale = 1.0, // NEU: Standard-Skalierung
 }) => {
     const meshRef = useRef<THREE.Mesh>(null!);
     const materialRef = useRef<THREE.MeshBasicMaterial>(null!);
@@ -730,7 +732,9 @@ const ImpactEffect: React.FC<ImpactEffectProps> = ({
     const aspectHeight = impactTexture?.image?.height ?? 1;
     const spriteAspect = aspectWidth / aspectHeight;
     
-    const spriteHeight = 0.5; // Größe des Impacts (anpassen nach Bedarf)
+    // NEU: Multipliziere Basisgröße mit der scale-Prop
+    const baseSpriteHeight = 0.5; // Basisgröße des Impacts
+    const spriteHeight = baseSpriteHeight * scale; 
     const spriteWidth = spriteHeight * spriteAspect;
 
     useEffect(() => {
@@ -844,6 +848,7 @@ interface ActiveImpactEffect {
     position: THREE.Vector3;
     unitTypeId: string;
     impactTexturePath?: string;
+    scale?: number; // NEU: Skalierungsfaktor für den Effekt
 }
 
 // NEU: Komponente für die umgebende Landschaft
@@ -890,9 +895,6 @@ const GameScreen: React.FC<GameScreenProps> = ({
 }) => {
   const { camera } = useThree(); 
   
-  // +++ DEBUG LOG: Check incoming activeProjectiles +++
-  console.log("GameScreen received gameState.activeProjectiles:", gameState?.activeProjectiles);
-  // +++ END DEBUG LOG +++
 
   // Zustand für die aktuell sichtbaren Impact-Effekte
   const [activeImpactEffects, setActiveImpactEffects] = useState<ActiveImpactEffect[]>([]);
@@ -970,7 +972,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
                 // Finde die Unit-Daten des entfernten Projektils
                 const unitData = placeholderUnits.find(u => u.id === prevProjectile.unitTypeId);
-                const weapon = unitData?.weapons?.[0];
+                // NEU: Finde die spezifische Waffe anhand der weaponId im Projektil
+                const weapon = unitData?.weapons?.find(w => w.id === prevProjectile.weaponId);
 
                 // Prüfe, ob Impact-Effekt angezeigt werden soll (inkl. Pfad-Check)
                 if (unitData && weapon?.impactEffectImage && weapon.impactEffectImagePath) {
@@ -978,7 +981,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
                     // Erstelle Position aus dem *vorherigen* Projektilzustand
                     const impactPosition = new THREE.Vector3(
                         prevProjectile.currentPos.x,
-                        0.5, // Höhe des Impacts (anpassen?)
+                        // NEU: Versuche currentPos.y, da targetPos.y fehlt
+                        prevProjectile.currentPos.y ?? 0.5, // Höhe vom letzten bekannten Punkt
                         prevProjectile.currentPos.z
                     );
 
@@ -986,8 +990,13 @@ const GameScreen: React.FC<GameScreenProps> = ({
                         id: uuidv4(),
                         position: impactPosition,
                         unitTypeId: unitData.id,
-                        impactTexturePath: path
+                        impactTexturePath: path,
+                        // NEU: Skalierungsfaktor von der Waffe holen (mit Default)
+                        scale: weapon.impactEffectImageScale ?? 1.0 
                     };
+                    
+                    // +++ Debug Log +++
+                    console.log("DEBUG: Creating impact effect", newEffect);
 
                     // Füge den neuen Effekt zum State hinzu
                     // Wichtig: Verwende die funktionale Form von setState, um Race Conditions zu vermeiden
@@ -1195,6 +1204,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
                             // Korrekte Prop übergeben:
                             impactTexturePath={effect.impactTexturePath} 
                             onComplete={handleImpactComplete}
+                            scale={effect.scale}
                         />
                      </Suspense>
                 </ErrorBoundary>

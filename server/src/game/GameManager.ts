@@ -742,6 +742,9 @@ export class GameManager {
                                      targetFigureId: targetForThisWeapon.figureId, 
                                      createdAt: now,
                                      totalFlightTime: totalFlightTime, 
+                                     // *** NEU: Füge Skalierung für Impact-Effekt hinzu ***
+                                     impactEffectImageScale: weapon.impactEffectImageScale ?? 1.0, // Default 1.0
+                                     impactEffectImagePath: weapon.impactEffectImagePath, // Auch Path hinzufügen, falls noch nicht geschehen
                                  };
                                  gameState.activeProjectiles.push(newProjectile);
                                  projectilesChanged = true;
