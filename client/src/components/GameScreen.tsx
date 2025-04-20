@@ -363,6 +363,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
     selectedUnitForPlacement, // Prop empfangen
     setSelectedUnitForPlacement, // Prop empfangen
 }) => {
+  const { camera } = useThree(); // Kamera-Objekt wieder hinzufügen
+
   // Zustand und Logik für UI-Elemente wurden nach GameLoader verschoben
   // Wir benötigen hier nur noch die Logik, die *direkt* die 3D-Szene beeinflusst.
 
@@ -373,6 +375,20 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const allPlacedUnits = useMemo(() => gameState?.players.flatMap(p => p.placedUnits) ?? [], [gameState?.players]);
   const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
   const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); // Wird für PlacementSystem benötigt
+
+  // Define axis length for helper
+  const axisLength = 10;
+
+  // Effekt zum einmaligen Setzen der initialen Kameraposition und des Ziels
+  useEffect(() => {
+    // const initialPosition = new THREE.Vector3(-25, 5, 25);
+    // const targetPosition = new THREE.Vector3(-20, 0, 25); // Blick entlang X mit 45° Neigung von y=5 auf y=0
+    const initialPosition = new THREE.Vector3(-25, 25, 25); 
+    const targetPosition = new THREE.Vector3(0, 0, 25); 
+
+    camera.position.copy(initialPosition);
+    camera.lookAt(targetPosition);
+  }, [camera]);
 
   if (!gameState) {
     // Sollte nicht passieren, da GameLoader wartet
@@ -392,19 +408,36 @@ const GameScreen: React.FC<GameScreenProps> = ({
         <directionalLight position={[10, 20, 5]} intensity={0.8} />
 
         {/* NEU: Achsen-Helfer (direkt nutzbar) */}
-        <axesHelper args={[10]} />
+        <axesHelper args={[axisLength]} />
+        
+        {/* Axis Labels */}
+        <Html position={[axisLength + 1, 0, 0]} center>
+           <span style={{ color: 'red', fontWeight: 'bold', fontSize: '1.5em' }}>X</span>
+        </Html>
+        <Html position={[0, axisLength + 1, 0]} center>
+           <span style={{ color: 'green', fontWeight: 'bold', fontSize: '1.5em' }}>Y</span>
+        </Html>
+        <Html position={[0, 0, axisLength + 1]} center>
+           <span style={{ color: 'blue', fontWeight: 'bold', fontSize: '1.5em' }}>Z</span>
+        </Html>
 
         {/* Boden-Plane mit neuer Textur */}
         <GroundPlane />
        
         <OrbitControls 
-          enableRotate={false} 
+          enableRotate={true} // Rotation generell erlauben
           enablePan={true}     
           mouseButtons={{
-            LEFT: THREE.MOUSE.PAN,   
+            LEFT: THREE.MOUSE.ROTATE, // Linke Taste für Rotation
             MIDDLE: THREE.MOUSE.DOLLY, 
+            RIGHT: THREE.MOUSE.PAN    // Rechte Taste für Panning (Bewegung)
           }}
           screenSpacePanning={false}
+          target={[0, 0, 25]} // Explizit das Ziel für OrbitControls setzen
+            // Vertikale Rotation: Keine Einschränkung
+            // Horizontale Rotation: ±45° von der Startrichtung (-90°)
+            minAzimuthAngle={-3 * Math.PI / 4} // -135°
+            maxAzimuthAngle={-Math.PI / 4}   // -45°
         /> 
 
         {/* NEU: Platziersystem rendern */}
