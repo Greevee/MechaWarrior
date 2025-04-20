@@ -221,10 +221,23 @@ button {
 
 .unit-tile.locked .unit-tile-lock {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  font-size: 1.2em;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
   opacity: 0.7;
+  pointer-events: none;
+  z-index: 1;
+  background-color: var(--hud-blue);
+  -webkit-mask-image: url('/assets/icons/lock.svg');
+  mask-image: url('/assets/icons/lock.svg');
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
 }
 
 .unit-tile.locked img,
@@ -394,17 +407,25 @@ button {
 }
 
 /* NEU: Styles für Schloss-Icon */
-.unit-tile-lock {
+.unit-tile.locked .unit-tile-lock {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: 40px; /* Große Schriftgröße für das Icon */
-    color: white;
-    opacity: 0.6; /* Transparent */
-    pointer-events: none; /* Ignoriert Maus-Events */
-    z-index: 1; /* Über dem Bild, aber unter Kosten falls nötig */
-    text-shadow: 0 0 5px black; /* Bessere Sichtbarkeit */
+    width: 40px;
+    height: 40px;
+    opacity: 0.7;
+    pointer-events: none;
+    z-index: 1;
+    background-color: var(--hud-blue);
+    -webkit-mask-image: url('/assets/icons/lock.svg');
+    mask-image: url('/assets/icons/lock.svg');
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
 }
 
 .hidden {
