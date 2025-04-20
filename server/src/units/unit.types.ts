@@ -23,6 +23,7 @@ export interface Unit {
   collisionRange?: number; // NEU: Radius für Kollisionserkennung (optional)
   modelScale?: number; // NEU: Skalierungsfaktor für das 3D-Modell (optional)
   formation: string;    // e.g., "5x2", "3x3", "1x1"
+  placementSpread?: number; // NEU: Zufällige Platzierungsabweichung (Radius)
 }
 
 export const placeholderUnits: Unit[] = [
@@ -48,7 +49,8 @@ export const placeholderUnits: Unit[] = [
     bulletSpeed: 30,
     collisionRange: 0.2,
     modelScale: 0.5,
-    formation: '5x3'
+    formation: '5x3',
+    placementSpread: 0.1
   },
   {
     id: 'human_small_tank',
@@ -72,7 +74,8 @@ export const placeholderUnits: Unit[] = [
     bulletSpeed: 20,
     collisionRange: 0.5,
     modelScale: 1.2,
-    formation: '5x1'
+    formation: '5x1',
+    placementSpread: 0.2
   }
 ];
 

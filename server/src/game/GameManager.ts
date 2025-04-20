@@ -282,6 +282,13 @@ export class GameManager {
             const offsetZ = startOffsetZ + row * spacingZ;
             const finalX = centerPosition.x + offsetX;
             const finalZ = centerPosition.z + offsetZ;
+
+            // Zufällige Abweichung hinzufügen
+            const spread = unitData.placementSpread ?? 0; // Standard 0, wenn nicht definiert
+            const randomOffsetX = (Math.random() - 0.5) * spread * 2; // Bereich [-spread, spread)
+            const randomOffsetZ = (Math.random() - 0.5) * spread * 2; // Bereich [-spread, spread)
+            const finalXWithOffset = finalX + randomOffsetX;
+            const finalZWithOffset = finalZ + randomOffsetZ;
             
             // console.log(`  Figure ${i}: Col=${col}, Row=${row} -> PosX=${finalX.toFixed(2)}, PosZ=${finalZ.toFixed(2)}`);
             figures.push({
@@ -289,7 +296,7 @@ export class GameManager {
                 unitInstanceId: '', // Wird nach Erstellung gesetzt
                 playerId: playerId,
                 unitTypeId: unitId,
-                position: { x: finalX, z: finalZ },
+                position: { x: finalXWithOffset, z: finalZWithOffset },
                 currentHP: unitData.hp,
                 behavior: 'idle',
                 targetFigureId: null,
