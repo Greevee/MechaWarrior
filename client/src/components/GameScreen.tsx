@@ -64,6 +64,9 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
     const recoilStartTime = useRef<number | null>(null);
     const recoilOffsetX = useRef(0); // NEU: Ref für den Offset, um Linter-Fehler zu beheben
 
+    // +++ NEU: Wiederverwendbare Vektoren für useFrame +++
+    const movementDirection = useMemo(() => new THREE.Vector3(), []); 
+
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === figureData.unitTypeId), [figureData.unitTypeId]);
     const modelScale = unitData?.modelScale ?? 1;
     const maxHP = unitData?.hp ?? 100; 
@@ -144,7 +147,8 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
         // --- Positionsinterpolation (bleibt gleich, zielt jetzt auf finalTargetY) ---
         interpolatedPosition.current.lerp(targetPosition, 0.1);
         
-        const movementDirection = interpolatedPosition.current.clone().sub(lastPosition.current);
+        // +++ NEU: Wiederverwendeten Vektor nutzen +++
+        movementDirection.copy(interpolatedPosition.current).sub(lastPosition.current);
         lastPosition.current.copy(interpolatedPosition.current);
 
         const moveThreshold = 0.001; // Kleiner Schwellenwert
@@ -370,6 +374,8 @@ interface InstancedProjectileMeshesProps {
 const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = React.memo(({ unitTypeId, projectiles }) => {
     const meshRef = useRef<THREE.InstancedMesh>(null!); // Ref für InstancedMesh
     const dummyObject = useMemo(() => new THREE.Object3D(), []); // Hilfsobjekt für Matrix-Berechnung
+    // +++ NEU: Wiederverwendbare Vektoren für useFrame +++
+    const targetPositionVec = useMemo(() => new THREE.Vector3(), []); 
 
     // --- Sprite Loading (nur einmal pro Typ) ---
     const getProjectileTexturePath = (typeId: string): string => {
@@ -416,7 +422,8 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 
             // Interpolieren zur Zielposition
             // Wir verwenden einen temporären Vektor, um das Ziel zu setzen
-            const targetPositionVec = new THREE.Vector3(targetX, targetY, targetZ);
+            // +++ NEU: Wiederverwendeten Vektor nutzen +++
+            targetPositionVec.set(targetX, targetY, targetZ);
             dummyObject.position.lerp(targetPositionVec, 0.3); // Behalte LERP für Glättung
 
             // Billboard-Effekt: Richte Instanz zur Kamera aus
@@ -471,12 +478,10 @@ interface LineProjectileEffectProps {
 const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ projectile }) => {
     // Refs für Start-/Endpunkt der Linie zur Interpolation
     // Initialisiere mit der Startposition, um "Springen" zu vermeiden
-    const startPointRef = useRef(new THREE.Vector3(projectile.originPos.x, 0.5, projectile.originPos.z));
-    const endPointRef = useRef(new THREE.Vector3(projectile.originPos.x, 0.5, projectile.originPos.z));
-    const geometryRef = useRef<THREE.BufferGeometry>(null!); // Ref für die Geometrie selbst
 
-    const TRAIL_LENGTH = 0.6; // Länge des Linien-Tracers
+    const TRAIL_LENGTH = 0.4; // Länge des Linien-Tracers
     const LINE_Y_OFFSET = 0.5; // Gleicher Y-Offset wie bei Sprites/Instanzen
+    const FORWARD_OFFSET = 0.5; // NEU: Distanz, um die Linie nach vorne zu verschieben
 
     // Richtung einmalig berechnen (oder wenn sich Ziel ändert? Vorerst konstant)
     const direction = useMemo(() => {
@@ -487,15 +492,39 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ 
         ).normalize();
     }, [projectile.originPos, projectile.targetPos]);
 
-    useFrame(() => {
-        // Zielposition aus Serverdaten holen
-        const targetEndPoint = new THREE.Vector3(projectile.currentPos.x, LINE_Y_OFFSET, projectile.currentPos.z);
-        
-        // Endpunkt interpolieren
-        endPointRef.current.lerp(targetEndPoint, 0.4); // Etwas schnelleres LERP für Linien?
+    // +++ NEU: Wiederverwendbare Vektoren für useFrame und Initialisierung +++
+    const initialOffset = useMemo(() => direction.clone().multiplyScalar(FORWARD_OFFSET), [direction]); // Initial berechnen ok
+    const offsetVector = useMemo(() => new THREE.Vector3(), []);
+    const lerpTarget = useMemo(() => new THREE.Vector3(), []);
+    const tempVec = useMemo(() => new THREE.Vector3(), []); // Für Zwischenberechnungen
 
-        // Startpunkt basierend auf interpoliertem Endpunkt und Richtung berechnen
-        startPointRef.current.copy(endPointRef.current).sub(direction.clone().multiplyScalar(TRAIL_LENGTH));
+    // NEU: Initialisiere Endpunkt mit Offset
+    const endPointRef = useRef(new THREE.Vector3(
+        projectile.originPos.x + initialOffset.x,
+        LINE_Y_OFFSET,
+        projectile.originPos.z + initialOffset.z
+    ));
+    // NEU: Initialisiere Startpunkt basierend auf initialem Endpunkt und Trail-Länge
+    // (Direkt hier berechnen ist ok, da nur einmalig)
+    const startPointRef = useRef(endPointRef.current.clone().sub(tempVec.copy(direction).multiplyScalar(TRAIL_LENGTH)));
+
+    const geometryRef = useRef<THREE.BufferGeometry>(null!); // Ref für die Geometrie selbst
+
+    useFrame(() => {
+        // +++ NEU: Wiederverwendete Vektoren nutzen +++
+        // Zielposition aus Serverdaten holen (lokale Variable OK)
+        const targetEndPoint = tempVec.set(projectile.currentPos.x, LINE_Y_OFFSET, projectile.currentPos.z); // tempVec hier wiederverwenden
+
+        // NEU: Zielposition für den Endpunkt mit Offset berechnen
+        offsetVector.copy(direction).multiplyScalar(FORWARD_OFFSET); // offsetVector wiederverwenden
+        lerpTarget.copy(targetEndPoint).add(offsetVector); // lerpTarget wiederverwenden
+
+        // Endpunkt interpolieren (zum offset Ziel)
+        endPointRef.current.lerp(lerpTarget, 0.4); // Etwas schnelleres LERP für Linien?
+
+        // Startpunkt basierend auf interpoliertem (und verschobenem) Endpunkt und Richtung berechnen
+        // (tempVec wird hier kurz für die Subtraktion wiederverwendet)
+        startPointRef.current.copy(endPointRef.current).sub(tempVec.copy(direction).multiplyScalar(TRAIL_LENGTH)); 
 
         // Update der Geometrie der Linie
         const geom = geometryRef.current;
@@ -528,7 +557,7 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ 
     // Erstelle das Linienobjekt mit Material manuell für <primitive>
     const lineObject = useMemo(() => {
         const material = new THREE.LineBasicMaterial({
-            color: "yellow",
+            color: "#ebd686", // NEU: Helleres Gelb
             linewidth: 1,
             transparent: true,
             opacity: 1

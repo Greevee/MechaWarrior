@@ -4,7 +4,7 @@ import { GameState, PlayerInGame, PlacedUnit, FigureState, ProjectileState, Figu
 import { Lobby, LobbyPlayer } from '../types/lobby.types';
 import { Unit, placeholderUnits, parseFormation } from '../units/unit.types';
 
-const TICK_INTERVAL_MS = 25; // 40 Ticks pro Sekunde
+const TICK_INTERVAL_MS = 50; // 40 Ticks pro Sekunde
 const preparationDurationMs = 60 * 1000; // 60 Sekunden
 const initialCredits = 200;
 const initialBaseHealth = 10000;
