@@ -39,6 +39,7 @@ export interface PlacedUnit {
     // Die 'position' der PlacedUnit ist jetzt der ursprüngliche Platzierungspunkt (Mitte)
     // Die Figuren bewegen sich von hier aus.
     initialPosition: { x: number; z: number }; 
+    rotation: 0 | 90; // NEU: Rotation der Einheit (0 oder 90 Grad)
     figures: FigureState[]; // Array der Figuren dieser Einheit
 }
 

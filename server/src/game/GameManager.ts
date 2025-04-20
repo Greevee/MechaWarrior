@@ -170,7 +170,7 @@ export class GameManager {
         return { success: true };
     }
 
-    public placeUnit(gameId: string, playerId: number, unitId: string, position: { x: number, z: number }): { success: boolean, message?: string } {
+    public placeUnit(gameId: string, playerId: number, unitId: string, position: { x: number, z: number }, rotation: 0 | 90): { success: boolean, message?: string } {
         const gameState = this.activeGames.get(gameId);
         if (!gameState || !gameState.players.has(playerId)) {
             return { success: false, message: 'Spiel oder Spieler nicht gefunden.' };
@@ -185,7 +185,7 @@ export class GameManager {
         if (playerState.unitsPlacedThisRound >= PLACEMENT_LIMIT_PER_ROUND) return { success: false, message: `Limit von ${PLACEMENT_LIMIT_PER_ROUND} erreicht.` };
         
         // Platzierungsvalidierung (Zone, Kollision)
-        const validationResult = this.validatePlacement(gameState, playerId, unitData, position);
+        const validationResult = this.validatePlacement(gameState, playerId, unitData, position, rotation);
         if (!validationResult.success) {
             return validationResult;
         }
@@ -194,7 +194,7 @@ export class GameManager {
         playerState.credits -= unitData.placementCost;
         playerState.unitsPlacedThisRound++;
 
-        const figures = this.createFiguresForUnit(playerId, unitId, unitData, position);
+        const figures = this.createFiguresForUnit(playerId, unitId, unitData, position, rotation);
         const unitInstanceId = uuidv4(); 
         figures.forEach(f => f.unitInstanceId = unitInstanceId);
 
@@ -203,15 +203,16 @@ export class GameManager {
             unitId: unitId,
             playerId: playerId,
             initialPosition: position,
+            rotation: rotation,
             figures: figures,
         };
         playerState.placedUnits.push(newPlacedUnit);
-        console.log(`GameManager: Spieler ${playerState.username} platziert ${unitId}.`);
+        console.log(`GameManager: Spieler ${playerState.username} platziert ${unitId} mit Rotation ${rotation}.`);
         this.emitGameStateUpdate(gameId, gameState);
         return { success: true };
     }
 
-    private validatePlacement(gameState: GameState, playerId: number, unitData: Unit, position: { x: number, z: number }): { success: boolean, message?: string } {
+    private validatePlacement(gameState: GameState, playerId: number, unitData: Unit, position: { x: number, z: number }, rotation: 0 | 90): { success: boolean, message?: string } {
         // Zonenprüfung
         let playerMinZ, playerMaxZ;
         const isHostPlacing = playerId === gameState.hostId;
@@ -226,8 +227,10 @@ export class GameManager {
             return { success: false, message: 'Position außerhalb des Platzierungsbereichs.' };
         }
         // Bounding Box / Grid Prüfung
-        const unitHalfWidth = unitData.width / 2;
-        const unitHalfDepth = unitData.height / 2;
+        const effectiveWidth = rotation === 90 ? unitData.height : unitData.width;
+        const effectiveHeight = rotation === 90 ? unitData.width : unitData.height;
+        const unitHalfWidth = effectiveWidth / 2;
+        const unitHalfDepth = effectiveHeight / 2;
         const newUnitBox = { minX: position.x - unitHalfWidth, maxX: position.x + unitHalfWidth, minZ: position.z - unitHalfDepth, maxZ: position.z + unitHalfDepth };
         const occupiedMinX = Math.floor(newUnitBox.minX);
         const occupiedMaxX = Math.ceil(newUnitBox.maxX) - 1;
@@ -241,8 +244,10 @@ export class GameManager {
             for (const placedUnit of player.placedUnits) {
                 const existingUnitData = placeholderUnits.find(u => u.id === placedUnit.unitId);
                 if (!existingUnitData) continue;
-                const existingUnitHalfWidth = existingUnitData.width / 2;
-                const existingUnitHalfDepth = existingUnitData.height / 2;
+                const existingEffectiveWidth = placedUnit.rotation === 90 ? existingUnitData.height : existingUnitData.width;
+                const existingEffectiveHeight = placedUnit.rotation === 90 ? existingUnitData.width : existingUnitData.height;
+                const existingUnitHalfWidth = existingEffectiveWidth / 2;
+                const existingUnitHalfDepth = existingEffectiveHeight / 2;
                 const existingUnitBox = { minX: placedUnit.initialPosition.x - existingUnitHalfWidth, maxX: placedUnit.initialPosition.x + existingUnitHalfWidth, minZ: placedUnit.initialPosition.z - existingUnitHalfDepth, maxZ: placedUnit.initialPosition.z + existingUnitHalfDepth };
                 const noOverlap = newUnitBox.maxX <= existingUnitBox.minX || newUnitBox.minX >= existingUnitBox.maxX || newUnitBox.maxZ <= existingUnitBox.minZ || newUnitBox.minZ >= existingUnitBox.maxZ;
                 if (!noOverlap) {
@@ -253,44 +258,60 @@ export class GameManager {
         return { success: true };
     }
 
-    private createFiguresForUnit(playerId: number, unitId: string, unitData: Unit, centerPosition: { x: number, z: number }): FigureState[] {
+    private createFiguresForUnit(playerId: number, unitId: string, unitData: Unit, centerPosition: { x: number, z: number }, rotation: 0 | 90): FigureState[] {
         const figures: FigureState[] = [];
         const formationInfo = parseFormation(unitData.formation);
         const useFormation = formationInfo && formationInfo.cols * formationInfo.rows >= unitData.squadSize;
+        
+        // Effektive Dimensionen für Formationsberechnung
+        const effectiveWidth = rotation === 90 ? unitData.height : unitData.width;
+        const effectiveHeight = rotation === 90 ? unitData.width : unitData.height;
+
         let cols = 1, rows = 1, spacingX = 1.0, spacingZ = 1.0;
 
         if (useFormation && formationInfo) {
-            cols = formationInfo.cols;
-            rows = formationInfo.rows;
-            spacingX = unitData.width > 0 ? unitData.width / cols : 1.0;
-            spacingZ = unitData.height > 0 ? unitData.height / rows : 1.0;
-            // console.log(`Creating figures with formation ${cols}x${rows} for ${unitData.id}. Spacing X=${spacingX.toFixed(2)}, Z=${spacingZ.toFixed(2)}`);
+            // Wenn rotiert, tausche cols/rows für die Berechnung
+            cols = rotation === 90 ? formationInfo.rows : formationInfo.cols;
+            rows = rotation === 90 ? formationInfo.cols : formationInfo.rows;
+            // Spacing basiert auf den rotierten Dimensionen!
+            spacingX = effectiveWidth > 0 ? effectiveWidth / cols : 1.0;
+            spacingZ = effectiveHeight > 0 ? effectiveHeight / rows : 1.0;
         } else {
-            // console.warn(`Using fallback arrangement for ${unitData.id}.`);
+            // Fallback-Anordnung (einfaches Gitter), berücksichtigt Rotation
             cols = Math.ceil(Math.sqrt(unitData.squadSize));
+            // Passe Spaltenanzahl für rotiertes Rechteck an
+            if (rotation === 90 && unitData.width > unitData.height) {
+                 cols = Math.ceil(unitData.squadSize / Math.floor(Math.sqrt(unitData.squadSize)));
+            } else if (rotation === 0 && unitData.height > unitData.width) {
+                 cols = Math.ceil(unitData.squadSize / Math.floor(Math.sqrt(unitData.squadSize)));
+            } 
             rows = Math.ceil(unitData.squadSize / cols);
-            spacingX = unitData.width > 0 ? unitData.width / cols : 1.0;
-            spacingZ = unitData.height > 0 ? unitData.height / rows : 1.0;
+            spacingX = effectiveWidth > 0 ? effectiveWidth / cols : 1.0;
+            spacingZ = effectiveHeight > 0 ? effectiveHeight / rows : 1.0;
         }
-        const startOffsetX = -unitData.width / 2 + spacingX / 2;
-        const startOffsetZ = -unitData.height / 2 + spacingZ / 2;
+        
+        const startOffsetX = -effectiveWidth / 2 + spacingX / 2;
+        const startOffsetZ = -effectiveHeight / 2 + spacingZ / 2;
 
         for (let i = 0; i < unitData.squadSize; i++) {
             const col = i % cols;
             const row = Math.floor(i / cols);
+            
+            // Berechne Offset relativ zur effektiven Box
             const offsetX = startOffsetX + col * spacingX;
             const offsetZ = startOffsetZ + row * spacingZ;
+            
+            // Finale Position (Mitte + Offset)
             const finalX = centerPosition.x + offsetX;
             const finalZ = centerPosition.z + offsetZ;
 
-            // Zufällige Abweichung hinzufügen
-            const spread = unitData.placementSpread ?? 0; // Standard 0, wenn nicht definiert
-            const randomOffsetX = (Math.random() - 0.5) * spread * 2; // Bereich [-spread, spread)
-            const randomOffsetZ = (Math.random() - 0.5) * spread * 2; // Bereich [-spread, spread)
+            // Zufällige Abweichung (bleibt gleich)
+            const spread = unitData.placementSpread ?? 0; 
+            const randomOffsetX = (Math.random() - 0.5) * spread * 2; 
+            const randomOffsetZ = (Math.random() - 0.5) * spread * 2; 
             const finalXWithOffset = finalX + randomOffsetX;
             const finalZWithOffset = finalZ + randomOffsetZ;
             
-            // console.log(`  Figure ${i}: Col=${col}, Row=${row} -> PosX=${finalX.toFixed(2)}, PosZ=${finalZ.toFixed(2)}`);
             figures.push({
                 figureId: uuidv4(),
                 unitInstanceId: '', // Wird nach Erstellung gesetzt
@@ -529,13 +550,18 @@ export class GameManager {
         gameState.players.forEach(player => {
             player.credits += incomePerRound * (gameState.round - 1); // Einkommen für vergangene Runde
             player.unitsPlacedThisRound = 0;
-            // Einheiten auf Startzustand zurücksetzen
+            // Einheiten auf Startzustand zurücksetzen (kopiert gespeicherten Zustand)
             player.placedUnits = JSON.parse(JSON.stringify(player.unitsAtCombatStart || []));
 
-            // Figurenpositionen und HP zurücksetzen
+            // Figurenpositionen und HP basierend auf der *gespeicherten* Rotation zurücksetzen
             player.placedUnits.forEach(unit => {
                 const unitData = placeholderUnits.find(ud => ud.id === unit.unitId);
                 if (!unitData) return;
+
+                // Verwende die gespeicherte Rotation der Einheit!
+                const rotation = unit.rotation; 
+                const effectiveWidth = rotation === 90 ? unitData.height : unitData.width;
+                const effectiveHeight = rotation === 90 ? unitData.width : unitData.height;
 
                 const figures = unit.figures;
                 const formationInfo = parseFormation(unitData.formation);
@@ -543,18 +569,24 @@ export class GameManager {
                 let cols = 1, rows = 1, spacingX = 1.0, spacingZ = 1.0;
 
                 if (useFormation && formationInfo) {
-                    cols = formationInfo.cols;
-                    rows = formationInfo.rows;
-                    spacingX = unitData.width > 0 ? unitData.width / cols : 1.0;
-                    spacingZ = unitData.height > 0 ? unitData.height / rows : 1.0;
+                    cols = rotation === 90 ? formationInfo.rows : formationInfo.cols;
+                    rows = rotation === 90 ? formationInfo.cols : formationInfo.rows;
+                    spacingX = effectiveWidth > 0 ? effectiveWidth / cols : 1.0;
+                    spacingZ = effectiveHeight > 0 ? effectiveHeight / rows : 1.0;
                 } else {
-                    cols = Math.ceil(Math.sqrt(figures.length));
+                    // Fallback-Berechnung (ähnlich wie in createFiguresForUnit)
+                     cols = Math.ceil(Math.sqrt(figures.length));
+                    if (rotation === 90 && unitData.width > unitData.height) {
+                        cols = Math.ceil(figures.length / Math.floor(Math.sqrt(figures.length)));
+                    } else if (rotation === 0 && unitData.height > unitData.width) {
+                        cols = Math.ceil(figures.length / Math.floor(Math.sqrt(figures.length)));
+                    } 
                     rows = Math.ceil(figures.length / cols);
-                    spacingX = unitData.width > 0 ? unitData.width / cols : 1.0;
-                    spacingZ = unitData.height > 0 ? unitData.height / rows : 1.0;
+                    spacingX = effectiveWidth > 0 ? effectiveWidth / cols : 1.0;
+                    spacingZ = effectiveHeight > 0 ? effectiveHeight / rows : 1.0;
                 }
-                const startOffsetX = -unitData.width / 2 + spacingX / 2;
-                const startOffsetZ = -unitData.height / 2 + spacingZ / 2;
+                const startOffsetX = -effectiveWidth / 2 + spacingX / 2;
+                const startOffsetZ = -effectiveHeight / 2 + spacingZ / 2;
 
                 figures.forEach((figure, i) => {
                     figure.currentHP = unitData.hp;
@@ -565,8 +597,10 @@ export class GameManager {
                     const row = Math.floor(i / cols);
                     const offsetX = startOffsetX + col * spacingX;
                     const offsetZ = startOffsetZ + row * spacingZ;
+                    // Position relativ zur initialPosition der PlacedUnit setzen
                     figure.position.x = unit.initialPosition.x + offsetX;
                     figure.position.z = unit.initialPosition.z + offsetZ;
+                     // Hier wird *keine* zufällige Abweichung mehr angewendet, wir wollen den Zustand von Kampfbeginn wiederherstellen
                 });
             });
         });

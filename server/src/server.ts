@@ -180,10 +180,16 @@ io.on('connection', (socket: Socket) => {
     callback(result);
   });
 
-  socket.on('game:place-unit', (data: { gameId: string, unitId: string, position: { x: number, z: number } }, callback: (response: any) => void) => {
+  socket.on('game:place-unit', (data: { 
+      gameId: string, 
+      unitId: string, 
+      position: { x: number, z: number },
+      rotation: 0 | 90 // NEU: Rotation empfangen
+    }, callback: (response: any) => void) => {
     const playerId = socket.data.playerId;
     if (!playerId) return callback({ success: false, message: 'Fehler: Spieler-ID nicht gefunden.' });
-    const result = gameManager.placeUnit(data.gameId, playerId, data.unitId, data.position);
+    // Übergebe Rotation an GameManager
+    const result = gameManager.placeUnit(data.gameId, playerId, data.unitId, data.position, data.rotation ?? 0); 
     callback(result);
   });
 

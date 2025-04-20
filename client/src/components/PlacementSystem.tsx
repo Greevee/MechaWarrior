@@ -15,25 +15,30 @@ const GRID_MAX_X = GRID_WIDTH / 2;
 const GRID_MIN_Z = 0;
 const GRID_MAX_Z = TOTAL_DEPTH;
 
-// --- Placement Preview Mesh Component --- (Angepasst für Farbwechsel)
+// --- Placement Preview Mesh Component --- (Angepasst für Rotation)
 const PlacementPreviewMesh: React.FC<{ 
     unit: Unit, 
     position: { x: number, z: number }, 
-    isValid: boolean 
-}> = ({ unit, position, isValid }) => {
-    const yOffset = 0.05; // Leicht über dem Boden und den gelben Highlights
+    isValid: boolean,
+    isRotated: boolean // NEU: Rotationsstatus
+}> = ({ unit, position, isValid, isRotated }) => {
+    const yOffset = 0.05; 
+
+    // NEU: Effektive Dimensionen basierend auf Rotation
+    const effectiveWidth = isRotated ? unit.height : unit.width;
+    const effectiveHeight = isRotated ? unit.width : unit.height;
 
     // Berechnung der endgültigen Platzierungsposition (zentriert auf Grid-Zellen)
-    const halfW = unit.width / 2;
-    const halfH = unit.height / 2;
+    const halfW = effectiveWidth / 2;
+    const halfH = effectiveHeight / 2;
     const minXCell = Math.floor(position.x - halfW + 0.5);
     const maxXCell = Math.floor(position.x + halfW - 0.5);
     const minZCell = Math.floor(position.z - halfH + 0.5);
     const maxZCell = Math.floor(position.z + halfH - 0.5);
     const finalCenterX = (minXCell + maxXCell) / 2;
     const finalCenterZ = (minZCell + maxZCell) / 2;
-    const planeWidth = unit.width;
-    const planeHeight = unit.height;
+    const planeWidth = effectiveWidth; // Verwende effektive Dimensionen
+    const planeHeight = effectiveHeight; // Verwende effektive Dimensionen
 
     const color = isValid ? 'green' : 'red';
 
@@ -42,30 +47,36 @@ const PlacementPreviewMesh: React.FC<{
             position={[finalCenterX + 0.5, yOffset, finalCenterZ + 0.5]}
             rotation={[-Math.PI / 2, 0, 0]}
         >
-            <planeGeometry args={[planeWidth, planeHeight]} />
+            {/* Verwende effektive Dimensionen für die Plane */}
+            <planeGeometry args={[planeWidth, planeHeight]} /> 
             <meshBasicMaterial
-                color={color} // Farbe basierend auf Gültigkeit
+                color={color} 
                 transparent
                 opacity={0.5}
                 side={THREE.DoubleSide}
-                depthWrite={false} // Verhindert Probleme mit Transparenz-Sortierung
+                depthWrite={false}
             />
         </mesh>
     );
 };
 
-// Hilfsfunktion zur Validierung der Platzierung
+// Hilfsfunktion zur Validierung der Platzierung (Angepasst für Rotation)
 const isValidPlacement = (
     unit: Unit,
     targetCenterPos: { x: number, z: number },
-    occupiedCells: Set<string>, // Set von "x,z" Strings
+    occupiedCells: Set<string>, 
     playerMinZ: number,
-    playerMaxZ: number
+    playerMaxZ: number,
+    isRotated: boolean // NEU: Rotationsstatus
 ): boolean => {
     if (!unit) return false;
 
-    const halfW = unit.width / 2;
-    const halfH = unit.height / 2;
+    // NEU: Effektive Dimensionen basierend auf Rotation
+    const effectiveWidth = isRotated ? unit.height : unit.width;
+    const effectiveHeight = isRotated ? unit.width : unit.height;
+
+    const halfW = effectiveWidth / 2;
+    const halfH = effectiveHeight / 2;
     const minXCell = Math.floor(targetCenterPos.x - halfW + 0.5);
     const maxXCell = Math.floor(targetCenterPos.x + halfW - 0.5);
     const minZCell = Math.floor(targetCenterPos.z - halfH + 0.5);
@@ -75,24 +86,20 @@ const isValidPlacement = (
         for (let z = minZCell; z <= maxZCell; z++) {
             // 1. Prüfung: Innerhalb der globalen Grid-Grenzen?
             if (x < GRID_MIN_X || x >= GRID_MAX_X || z < GRID_MIN_Z || z >= GRID_MAX_Z) {
-                // console.log(`Validation failed: Out of global bounds at ${x},${z}`);
                 return false;
             }
             // 2. Prüfung: Innerhalb der Spieler-Platzierungszone?
-            if (z < playerMinZ || z >= playerMaxZ) { // Z-Grenzen sind exklusiv oben
-                // console.log(`Validation failed: Out of player Z bounds (${playerMinZ}-${playerMaxZ}) at ${x},${z}`);
+            if (z < playerMinZ || z >= playerMaxZ) { 
                 return false;
             }
             // 3. Prüfung: Kollision mit anderer Einheit?
             if (occupiedCells.has(`${x},${z}`)) {
-                // console.log(`Validation failed: Collision at ${x},${z}`);
                 return false;
             }
         }
     }
     
-    // console.log(`Validation success at ${targetCenterPos.x},${targetCenterPos.z}`);
-    return true; // Alle Zellen sind gültig
+    return true; 
 };
 
 // --- Placement Zone Highlight Component --- (Aus GameScreen.tsx kopiert)
@@ -141,13 +148,21 @@ const PlacementZoneHighlight: React.FC<{ gameState: ClientGameState, playerId: n
     );
 };
 
-// --- Placement Grid Cursor Component --- (Aus GameScreen.tsx kopiert)
-const PlacementGridCursor: React.FC<{ unit: Unit, previewPosition: { x: number, z: number } }> = ({ unit, previewPosition }) => {
+// --- Placement Grid Cursor Component --- (Angepasst für Rotation)
+const PlacementGridCursor: React.FC<{ 
+    unit: Unit, 
+    previewPosition: { x: number, z: number },
+    isRotated: boolean // NEU: Rotationsstatus
+}> = ({ unit, previewPosition, isRotated }) => {
     const yOffset = 0.02;
     const extension = 5;
 
-    const halfW = unit.width / 2;
-    const halfH = unit.height / 2;
+    // NEU: Effektive Dimensionen basierend auf Rotation
+    const effectiveWidth = isRotated ? unit.height : unit.width;
+    const effectiveHeight = isRotated ? unit.width : unit.height;
+
+    const halfW = effectiveWidth / 2;
+    const halfH = effectiveHeight / 2;
     const minXCell = Math.floor(previewPosition.x - halfW + 0.5);
     const maxXCell = Math.floor(previewPosition.x + halfW - 0.5);
     const minZCell = Math.floor(previewPosition.z - halfH + 0.5);
@@ -156,10 +171,12 @@ const PlacementGridCursor: React.FC<{ unit: Unit, previewPosition: { x: number, 
     const finalCenterZ = (minZCell + maxZCell) / 2;
     const yellowCenterX = finalCenterX + 0.5;
     const yellowCenterZ = finalCenterZ + 0.5;
-    const yellowMinX = yellowCenterX - unit.width / 2;
-    const yellowMaxX = yellowCenterX + unit.width / 2;
-    const yellowMinZ = yellowCenterZ - unit.height / 2;
-    const yellowMaxZ = yellowCenterZ + unit.height / 2;
+    
+    // Verwende effektive Dimensionen für die Berechnung der Grid-Grenzen
+    const yellowMinX = yellowCenterX - effectiveWidth / 2;
+    const yellowMaxX = yellowCenterX + effectiveWidth / 2;
+    const yellowMinZ = yellowCenterZ - effectiveHeight / 2;
+    const yellowMaxZ = yellowCenterZ + effectiveHeight / 2;
     const gridMinX = Math.round(yellowMinX - extension);
     const gridMaxX = Math.round(yellowMaxX + extension);
     const gridMinZ = Math.round(yellowMinZ - extension);
@@ -168,8 +185,9 @@ const PlacementGridCursor: React.FC<{ unit: Unit, previewPosition: { x: number, 
     const lines: React.ReactElement[] = [];
     const calculateOpacity = (distance: number) => Math.max(0.05, 1.0 - distance * 0.2);
 
+    // Verwende effektive Dimensionen für die Distanzberechnung
     for (let x = gridMinX; x <= gridMaxX; x++) {
-        const dist = Math.max(0, Math.abs(x - yellowCenterX) - unit.width / 2);
+        const dist = Math.max(0, Math.abs(x - yellowCenterX) - effectiveWidth / 2);
         const opacity = calculateOpacity(dist);
         const start = new THREE.Vector3(x, yOffset, gridMinZ);
         const end = new THREE.Vector3(x, yOffset, gridMaxZ);
@@ -177,7 +195,7 @@ const PlacementGridCursor: React.FC<{ unit: Unit, previewPosition: { x: number, 
     }
 
     for (let z = gridMinZ; z <= gridMaxZ; z++) {
-        const dist = Math.max(0, Math.abs(z - yellowCenterZ) - unit.height / 2);
+        const dist = Math.max(0, Math.abs(z - yellowCenterZ) - effectiveHeight / 2);
         const opacity = calculateOpacity(dist);
         const start = new THREE.Vector3(gridMinX, yOffset, z);
         const end = new THREE.Vector3(gridMaxX, yOffset, z);
@@ -205,6 +223,7 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
 }) => {
     const [placementPreviewPosition, setPlacementPreviewPosition] = useState<{ x: number, z: number } | null>(null);
     const [isCurrentPlacementValid, setIsCurrentPlacementValid] = useState<boolean>(false);
+    const [isRotated, setIsRotated] = useState<boolean>(false); // NEU: Rotationszustand
 
     // Berechne Grenzen der Spielerzone
     const { playerMinZ, playerMaxZ } = useMemo(() => {
@@ -223,22 +242,72 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
         return { playerMinZ: pMinZ, playerMaxZ: pMaxZ };
     }, [gameState, playerId]);
 
-    // Berechne besetzte Zellen des aktuellen Spielers
+    // Berechne besetzte Zellen (NEUE LOGIK)
     const occupiedCells = useMemo(() => {
         const cells = new Set<string>();
         if (!selfPlayer || !selfPlayer.placedUnits) return cells;
 
-        selfPlayer.placedUnits.forEach(unit => {
-            unit.figures.forEach(figure => {
-                const cellX = Math.floor(figure.position.x);
-                const cellZ = Math.floor(figure.position.z);
-                cells.add(`${cellX},${cellZ}`);
-            });
+        selfPlayer.placedUnits.forEach(placedUnit => {
+            // Finde die Basisdaten der Einheit
+            const unitData = placeholderUnits.find(u => u.id === placedUnit.unitId);
+            if (!unitData) return; // Überspringe, wenn Einheitendaten nicht gefunden werden
+
+            // Berücksichtige die Rotation der platzierten Einheit
+            const isRotated = placedUnit.rotation === 90;
+            const effectiveWidth = isRotated ? unitData.height : unitData.width;
+            const effectiveHeight = isRotated ? unitData.width : unitData.height;
+            
+            const centerPosition = placedUnit.initialPosition;
+            const halfW = effectiveWidth / 2;
+            const halfH = effectiveHeight / 2;
+
+            // Berechne die Min/Max-Zellen, die von der Einheit abgedeckt werden
+            const minXCell = Math.floor(centerPosition.x - halfW + 0.5);
+            const maxXCell = Math.floor(centerPosition.x + halfW - 0.5);
+            const minZCell = Math.floor(centerPosition.z - halfH + 0.5);
+            const maxZCell = Math.floor(centerPosition.z + halfH - 0.5);
+
+            // Füge ALLE Zellen im Bereich zum Set hinzu
+            for (let x = minXCell; x <= maxXCell; x++) {
+                for (let z = minZCell; z <= maxZCell; z++) {
+                    cells.add(`${x},${z}`);
+                }
+            }
         });
         return cells;
-    }, [selfPlayer]);
+    }, [selfPlayer]); // Abhängigkeit bleibt selfPlayer (genauer: selfPlayer.placedUnits)
 
-    // Effekt zur Validierung, wenn sich Vorschauposition oder Auswahl ändert
+    // NEU: Effekt für Tastatur-Listener zur Rotation
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            // Prüfe, ob 'r' gedrückt wurde UND eine Einheit ausgewählt ist
+            if ((event.key === 'r' || event.key === 'R') && selectedUnitForPlacement) {
+                 console.log("Rotate key pressed");
+                 setIsRotated(prev => !prev); // Schalte Rotation um
+            }
+        };
+
+        // Füge Listener hinzu, wenn Einheit ausgewählt ist
+        if (selectedUnitForPlacement) {
+            window.addEventListener('keydown', handleKeyDown);
+            // console.log("Rotation listener added");
+        }
+
+        // Aufräumfunktion: Entferne Listener
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            // console.log("Rotation listener removed");
+        };
+    }, [selectedUnitForPlacement]); // Abhängig von der ausgewählten Einheit
+
+    // NEU: Effekt zum Zurücksetzen der Rotation, wenn Einheit abgewählt wird
+     useEffect(() => {
+        if (!selectedUnitForPlacement) {
+            setIsRotated(false);
+        }
+    }, [selectedUnitForPlacement]);
+
+    // Effekt zur Validierung (jetzt auch abhängig von isRotated)
     useEffect(() => {
         if (selectedUnitForPlacement && placementPreviewPosition && playerMinZ !== null && playerMaxZ !== null) {
             const isValid = isValidPlacement(
@@ -246,13 +315,14 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
                 placementPreviewPosition,
                 occupiedCells,
                 playerMinZ,
-                playerMaxZ
+                playerMaxZ,
+                isRotated // Übergebe Rotationsstatus
             );
             setIsCurrentPlacementValid(isValid);
         } else {
-            setIsCurrentPlacementValid(false); // Ungültig, wenn nichts ausgewählt/positioniert ist
+            setIsCurrentPlacementValid(false); 
         }
-    }, [selectedUnitForPlacement, placementPreviewPosition, occupiedCells, playerMinZ, playerMaxZ]);
+    }, [selectedUnitForPlacement, placementPreviewPosition, occupiedCells, playerMinZ, playerMaxZ, isRotated]); // isRotated hinzugefügt
 
     // Event Handlers
     const handlePlacementPointerMove = (event: any) => {
@@ -280,14 +350,17 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
     const handlePlacementClick = (event: any) => {
         if (!selectedUnitForPlacement || !gameState || !selfPlayer || !placementPreviewPosition || !isCurrentPlacementValid) {
              console.warn("[PlacementSystem:Click] Click ignored, placement invalid or missing data.");
-            return; // Klick ignorieren, wenn Platzierung nicht gültig ist
+            return; 
         }
         
         event.stopPropagation();
 
-        // Berechne die finale Mittelpunkt-Position basierend auf den Zellen
-        const halfW = selectedUnitForPlacement.width / 2;
-        const halfH = selectedUnitForPlacement.height / 2;
+        // Effektive Dimensionen für finale Positionsberechnung
+        const effectiveWidth = isRotated ? selectedUnitForPlacement.height : selectedUnitForPlacement.width;
+        const effectiveHeight = isRotated ? selectedUnitForPlacement.width : selectedUnitForPlacement.height;
+
+        const halfW = effectiveWidth / 2;
+        const halfH = effectiveHeight / 2;
         const minXCell = Math.floor(placementPreviewPosition.x - halfW + 0.5);
         const maxXCell = Math.floor(placementPreviewPosition.x + halfW - 0.5);
         const minZCell = Math.floor(placementPreviewPosition.z - halfH + 0.5);
@@ -298,8 +371,8 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
         const placementData = {
             gameId: gameState.gameId,
             unitId: selectedUnitForPlacement.id,
-             // Sende die berechnete Mittelpunkt-Position an den Server
             position: { x: finalCenterX, z: finalCenterZ },
+            rotation: isRotated ? 90 : 0 // NEU: Rotation hinzufügen
         };
         console.log("[PlacementSystem:Click] Emitting 'game:place-unit'", placementData);
         socket.emit('game:place-unit', placementData, (response: any) => {
@@ -325,48 +398,48 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
 
     return (
         <>
-            {/* Highlight für die eigene Platzierungszone */}
+            {/* Highlight für die eigene Platzierungszone (Immer sichtbar in Vorbereitung) */}
             <PlacementZoneHighlight gameState={gameState} playerId={playerId} />
 
-            {/* Visualisierung der besetzten Zellen (Gelb) */}
-            {Array.from(occupiedCells).map(cellKey => {
-                const [xStr, zStr] = cellKey.split(',');
-                const x = parseInt(xStr, 10);
-                const z = parseInt(zStr, 10);
-                // Rendere nur, wenn die Zelle in der Spielerzone liegt
-                if (z >= playerMinZ && z < playerMaxZ) {
-                    return (
-                        <Plane 
-                            key={`occupied-${x}-${z}`}
-                            args={[1, 1]} // Größe einer Zelle
-                            position={[x + 0.5, 0.02, z + 0.5]} // Leicht über dem Boden
-                            rotation={[-Math.PI / 2, 0, 0]}
-                        >
-                            <meshBasicMaterial 
-                                color="yellow" 
-                                transparent 
-                                opacity={0.3} 
-                                side={THREE.DoubleSide} 
-                                depthWrite={false}
-                            />
-                        </Plane>
-                    );
-                }
-                return null;
-            })}
-
-            {/* Interaktionsebene, Vorschau und Gitter nur wenn Einheit ausgewählt ist */}
+            {/* Interaktionsebene, Vorschau, Gitter UND besetzte Zellen nur wenn Einheit ausgewählt ist */}
             {selectedUnitForPlacement && (
                 <>
+                    {/* Visualisierung der besetzten Zellen (Gelb) - JETZT HIER DRIN */}
+                    {Array.from(occupiedCells).map(cellKey => {
+                        const [xStr, zStr] = cellKey.split(',');
+                        const x = parseInt(xStr, 10);
+                        const z = parseInt(zStr, 10);
+                        // Rendere nur, wenn die Zelle in der Spielerzone liegt
+                        if (playerMinZ !== null && playerMaxZ !== null && z >= playerMinZ && z < playerMaxZ) {
+                            return (
+                                <Plane 
+                                    key={`occupied-${x}-${z}`}
+                                    args={[1, 1]} // Größe einer Zelle
+                                    position={[x + 0.5, 0.02, z + 0.5]} // Leicht über dem Boden
+                                    rotation={[-Math.PI / 2, 0, 0]}
+                                >
+                                    <meshBasicMaterial 
+                                        color="yellow" 
+                                        transparent 
+                                        opacity={0.3} 
+                                        side={THREE.DoubleSide} 
+                                        depthWrite={false}
+                                    />
+                                </Plane>
+                            );
+                        }
+                        return null;
+                    })}
+
                     {/* Unsichtbare Ebene für Maus-Events */}
                     <Plane
                         args={[playerZoneWidth, playerZoneDepth]}
-                        position={[playerZoneCenterX, 0.01, playerZoneCenterZ]} // Position und Größe basierend auf Spielerzone
+                        position={[playerZoneCenterX, 0.01, playerZoneCenterZ]} 
                         rotation={[-Math.PI / 2, 0, 0]}
-                        visible={false} // Unsichtbar, nur für Pointer Events
+                        visible={false} 
                         onPointerMove={handlePlacementPointerMove}
                         onPointerOut={handlePlacementPointerOut}
-                        onClick={handlePlacementClick} // Klick-Handler hier
+                        onClick={handlePlacementClick} 
                     />
                     {/* Sichtbare Vorschau (Rot/Grün) */} 
                     {placementPreviewPosition && (
@@ -374,11 +447,16 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
                             unit={selectedUnitForPlacement} 
                             position={placementPreviewPosition} 
                             isValid={isCurrentPlacementValid}
+                            isRotated={isRotated} 
                         />
                     )}
                     {/* Optional: Platzierungsgitter anzeigen */} 
                     {placementPreviewPosition && (
-                       <PlacementGridCursor unit={selectedUnitForPlacement} previewPosition={placementPreviewPosition}/>
+                       <PlacementGridCursor 
+                            unit={selectedUnitForPlacement} 
+                            previewPosition={placementPreviewPosition} 
+                            isRotated={isRotated} 
+                       />
                     )}
                 </>
             )}

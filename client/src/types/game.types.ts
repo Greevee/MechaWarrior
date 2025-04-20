@@ -43,6 +43,7 @@ export interface PlacedUnit {
     unitId: string;
     playerId: number;
     initialPosition: { x: number; z: number }; // Geändert von position
+    rotation: 0 | 90; // NEU: Hinzugefügt (synchron mit Server)
     figures: FigureState[]; // Hinzugefügt
 }
 
