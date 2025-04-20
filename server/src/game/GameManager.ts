@@ -1,4 +1,4 @@
-import { Server as SocketIOServer } from 'socket.io';
+import { Server as SocketIOServer, Socket } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
 import { GameState, PlayerInGame, PlacedUnit, FigureState, ProjectileState, FigureBehaviorState, GamePhase } from '../types/game.types';
 import { Lobby, LobbyPlayer } from '../types/lobby.types';
@@ -26,6 +26,7 @@ export class GameManager {
     private preparationTimers = new Map<string, NodeJS.Timeout>();
     private gameLoopInterval: NodeJS.Timeout | null = null;
     private io: SocketIOServer;
+    private playerSockets = new Map<number, string>();
 
     constructor(io: SocketIOServer) {
         this.io = io;
@@ -54,6 +55,7 @@ export class GameManager {
                 unitsPlacedThisRound: 0,
                 unitsAtCombatStart: [],
             });
+            this.playerSockets.set(lobbyPlayer.id, lobbyPlayer.socketId);
         }
 
         const initialGameState: GameState = {
@@ -81,6 +83,7 @@ export class GameManager {
     }
 
     public removePlayer(playerId: number): void {
+        this.playerSockets.delete(playerId);
         // Geht durch alle Spiele und entfernt den Spieler oder beendet das Spiel
         this.activeGames.forEach((game, gameId) => {
             if (game.players.has(playerId)) {
@@ -520,17 +523,82 @@ export class GameManager {
         let player1Alive = false;
         let player2Alive = false;
         const playerIds = Array.from(gameState.players.keys());
+        let roundOver = false;
+
         if (playerIds.length === 2) {
              player1Alive = Array.from(figureMap.values()).some(f => f.playerId === playerIds[0]);
              player2Alive = Array.from(figureMap.values()).some(f => f.playerId === playerIds[1]);
-             if (!player1Alive || !player2Alive) {
-                 console.log(`GameManager: Runde ${gameState.round} beendet in Spiel ${gameId}.`);
-                 this.resetGameToPreparation(gameId);
-                 return; // Reset kümmert sich um Update, hier abbrechen
-             }
+             roundOver = !player1Alive || !player2Alive; // Runde ist vorbei, wenn einer verloren hat
         }
 
-        // 6. Update senden, wenn nötig
+        if (roundOver) {
+            console.log(`GameManager: Runde ${gameState.round} beendet in Spiel ${gameId}.`);
+
+            // NEU: Basisschaden berechnen und anwenden
+            let loserId: number | null = null;
+            let winnerId: number | null = null;
+
+            if (!player1Alive && player2Alive) { // Spieler 1 hat verloren
+                loserId = playerIds[0];
+                winnerId = playerIds[1];
+            } else if (player1Alive && !player2Alive) { // Spieler 2 hat verloren
+                loserId = playerIds[1];
+                winnerId = playerIds[0];
+            } else if (!player1Alive && !player2Alive) {
+                // Unentschieden - Kein Basisschaden
+                console.log(`GameManager: Runde ${gameState.round} endet unentschieden.`);
+            }
+
+            if (loserId !== null && winnerId !== null) {
+                const winnerState = gameState.players.get(winnerId)!;
+                const loserState = gameState.players.get(loserId)!;
+                let totalDamage = 0;
+
+                winnerState.placedUnits.forEach(survivingUnit => {
+                    const unitData = placeholderUnits.find(u => u.id === survivingUnit.unitId);
+                    if (unitData && unitData.squadSize > 0) { // Stelle sicher, dass squadSize vorhanden und > 0 ist
+                        const initialFigureCount = unitData.squadSize;
+                        const remainingFigureCount = survivingUnit.figures.length;
+                        
+                        // Berechne den Anteil der überlebenden Figuren
+                        const survivingRatio = remainingFigureCount / initialFigureCount;
+                        
+                        // Berechne den proportionalen Schaden
+                        const unitDamage = Math.round(unitData.placementCost * survivingRatio);
+                        
+                        // console.log(`  Einheit ${unitData.id}: ${remainingFigureCount}/${initialFigureCount} überlebt -> Schaden: ${unitDamage} (von ${unitData.placementCost})`);
+                        totalDamage += unitDamage; 
+                    }
+                });
+
+                if (totalDamage > 0) {
+                    const previousHealth = loserState.baseHealth;
+                    loserState.baseHealth = Math.max(0, loserState.baseHealth - totalDamage); // Wende Schaden an, min 0
+                    console.log(`GameManager: Spieler ${loserState.username} (ID: ${loserId}) erleidet ${totalDamage} Basisschaden. HP: ${previousHealth} -> ${loserState.baseHealth}`);
+                    unitsChanged = true; // Stelle sicher, dass das Update gesendet wird
+
+                    // TODO: Spielende prüfen und behandeln
+                    if (loserState.baseHealth <= 0) {
+                        console.log(`GameManager: Spieler ${loserState.username} (ID: ${loserId}) hat keine Basis-HP mehr! Spiel ${gameId} vorbei.`);
+                        gameState.phase = 'GameOver'; // Beispiel: Phase ändern
+                        // Hier könnte man den Gewinner explizit markieren oder weitere Aufräumarbeiten durchführen.
+                        // Fürs Erste ändern wir nur die Phase und der Reset wird nicht mehr aufgerufen.
+                        this.emitGameStateUpdate(gameId, gameState); // Sende finalen Zustand
+                        // Optional: Timer stoppen, Spiel aus activeGames entfernen etc.
+                         this.clearPreparationTimer(gameId); // Timer sicherheitshalber stoppen
+                         // this.activeGames.delete(gameId); // Spiel beenden?
+                        return; // Verhindere den Reset zur Vorbereitung
+                    }
+                }
+            }
+            // ----- Ende Basisschaden Logik -----
+
+            // Setze das Spiel für die nächste Runde zurück (nur wenn nicht GameOver)
+            this.resetGameToPreparation(gameId);
+            return; // Reset kümmert sich um Update, hier abbrechen
+        }
+
+        // 6. Update senden, wenn nötig (und Runde nicht vorbei ist)
         if (unitsChanged || figuresRemoved || projectilesChanged) {
             this.emitGameStateUpdate(gameId, gameState);
         }
@@ -612,21 +680,52 @@ export class GameManager {
     // --- Hilfsfunktionen --- 
 
     private emitGameStateUpdate(gameId: string, gameState: GameState): void {
-        const serializableState = this.getSerializableGameState(gameState);
-        this.io.to(gameId).emit('game:state-update', serializableState);
+        gameState.players.forEach((player, playerId) => {
+            const socketId = this.playerSockets.get(playerId);
+            if (socketId) {
+                const filteredState = this.filterGameStateForPlayer(gameState, playerId);
+                this.io.to(socketId).emit('game:state-update', filteredState);
+            } else {
+                console.warn(`GameManager: Socket-ID für Spieler ${playerId} in Spiel ${gameId} nicht gefunden! Update fehlgeschlagen.`);
+            }
+        });
+    }
+
+    private filterGameStateForPlayer(gameState: GameState, targetPlayerId: number): any {
+        if (gameState.phase !== 'Preparation') {
+            return this.getSerializableGameState(gameState);
+        }
+
+        const originalPlayersMap = gameState.players;
+        const tempSerializableState = this.getSerializableGameState(gameState);
+        const filteredPlayersArray: PlayerInGame[] = [];
+
+        originalPlayersMap.forEach((playerState, playerId) => {
+            const playerStateCopy = JSON.parse(JSON.stringify(playerState));
+
+            if (playerId === targetPlayerId) {
+                // Eigener Spieler: Behalte aktuelle placedUnits
+                // Nichts zu ändern, da wir vom aktuellen State kopiert haben
+            } else {
+                // Gegnerischer Spieler: Zeige nur Einheiten vom letzten Kampfstart
+                playerStateCopy.placedUnits = playerState.unitsAtCombatStart || []; 
+            }
+            filteredPlayersArray.push(playerStateCopy);
+        });
+
+        tempSerializableState.players = filteredPlayersArray;
+        return tempSerializableState;
     }
 
     private getSerializableGameState(gameState: GameState): any {
         return {
             ...gameState,
             players: Array.from(gameState.players.values()),
-            // Sicherstellen, dass activeProjectiles immer ein Array ist
             activeProjectiles: gameState.activeProjectiles || [], 
         };
     }
 
-     // Wird von updateCombatState verwendet
-     private calculateDistanceSq(pos1: { x: number, z: number }, pos2: { x: number, z: number }): number {
+    private calculateDistanceSq(pos1: { x: number, z: number }, pos2: { x: number, z: number }): number {
         const dx = pos1.x - pos2.x;
         const dz = pos1.z - pos2.z;
         return dx * dx + dz * dz;

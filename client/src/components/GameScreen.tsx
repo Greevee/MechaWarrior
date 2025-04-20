@@ -8,6 +8,17 @@ import './GameScreen.css';
 import PlacementSystem from './PlacementSystem.tsx';
 import ErrorBoundary from './ErrorBoundary';
 import { v4 as uuidv4 } from 'uuid';
+import { useGameStore } from '../store/gameStore'; // Store importieren
+
+// Konstanten für die Grid-Dimensionen (ggf. auslagern)
+const GRID_WIDTH = 50;
+const PLAYER_ZONE_DEPTH = 20;
+const NEUTRAL_ZONE_DEPTH = 10;
+const TOTAL_DEPTH = PLAYER_ZONE_DEPTH * 2 + NEUTRAL_ZONE_DEPTH;
+const GRID_MIN_X = -GRID_WIDTH / 2;
+const GRID_MAX_X = GRID_WIDTH / 2;
+const GRID_MIN_Z = 0;
+const GRID_MAX_Z = TOTAL_DEPTH;
 
 // --- Health Bar Component ---
 const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = React.memo(({ currentHP, maxHP, scale }) => {
@@ -44,6 +55,7 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
     const lastPosition = useRef(new THREE.Vector3().copy(interpolatedPosition.current));
     const [yOffset, setYOffset] = useState(0);
     const facingScaleX = useRef(1); // Ref für die horizontale Ausrichtung (1 = rechts, -1 = links)
+    const { setSelectedFigureId } = useGameStore(); // NEU: Setter für FigureId holen
 
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === figureData.unitTypeId), [figureData.unitTypeId]);
     const modelScale = unitData?.modelScale ?? 1;
@@ -139,9 +151,15 @@ const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = 
         }
     });
 
+    const handleClick = (event: any) => {
+        event.stopPropagation(); 
+        console.log(`Figure clicked: ${figureData.figureId}`);
+        setSelectedFigureId(figureData.figureId); // NEU: Setze FigureId
+    };
+
     return (
         // Group wird NUR noch positioniert
-        <group ref={meshRef} key={figureData.figureId}>
+        <group ref={meshRef} key={figureData.figureId} onClick={handleClick}>
             <Billboard>             
                  {/* Original Sprite-Plane */}
                  <Plane args={[spriteWidth, spriteHeight]} scale={[facingScaleX.current, 1, 1]}>
@@ -423,6 +441,58 @@ const ImpactEffect: React.FC<ImpactEffectProps> = ({
     );
 };
 
+// NEU: Komponente für Fog of War Overlay
+const FogOfWarOverlay: React.FC<{ gameState: ClientGameState, playerId: number | null }> = ({ gameState, playerId }) => {
+    // Rendere nichts, wenn nicht in Vorbereitung oder Spieler-ID fehlt
+    if (gameState.phase !== 'Preparation' || playerId === null) {
+        return null;
+    }
+
+    const { opponentZoneMinZ, opponentZoneMaxZ } = useMemo(() => {
+        let oppMinZ: number | null = null;
+        let oppMaxZ: number | null = null;
+        const isHost = playerId === gameState.hostId;
+
+        if (isHost) {
+            // Wenn ich Host bin, ist Gegnerzone hinten
+            oppMinZ = PLAYER_ZONE_DEPTH + NEUTRAL_ZONE_DEPTH;
+            oppMaxZ = GRID_MAX_Z;
+        } else {
+            // Wenn ich nicht Host bin, ist Gegnerzone vorne
+            oppMinZ = GRID_MIN_Z;
+            oppMaxZ = PLAYER_ZONE_DEPTH;
+        }
+        return { opponentZoneMinZ: oppMinZ, opponentZoneMaxZ: oppMaxZ };
+    }, [gameState.hostId, playerId]);
+
+    // Wenn Zonen nicht berechnet werden konnten (sollte nicht passieren)
+    if (opponentZoneMinZ === null || opponentZoneMaxZ === null) {
+        return null;
+    }
+
+    const zoneWidth = GRID_MAX_X - GRID_MIN_X;
+    const zoneDepth = opponentZoneMaxZ - opponentZoneMinZ;
+    const zoneCenterX = (GRID_MIN_X + GRID_MAX_X) / 2; // Sollte 0 sein
+    const zoneCenterZ = (opponentZoneMinZ + opponentZoneMaxZ) / 2;
+    const yOffset = 0.03; // Leicht über den gelben Highlights
+
+    return (
+        <Plane
+            args={[zoneWidth, zoneDepth]}
+            position={[zoneCenterX, yOffset, zoneCenterZ]}
+            rotation={[-Math.PI / 2, 0, 0]}
+        >
+            <meshBasicMaterial 
+                color="black" 
+                transparent 
+                opacity={0.4} // Dunkelheit anpassen
+                side={THREE.DoubleSide} 
+                depthWrite={false} // Um Sortierungsprobleme zu vermeiden
+            />
+        </Plane>
+    );
+};
+
 // NEU: Definiere Props für GameScreen
 interface GameScreenProps {
     gameState: ClientGameState;
@@ -606,6 +676,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
        
         {/* NEU: Umgebende Landschaft hinzufügen */}
         <SurroundingLandscape />
+       
+        {/* NEU: Fog of War Overlay (nur in Vorbereitung sichtbar) */} 
+        <FogOfWarOverlay gameState={gameState} playerId={playerId} />
        
         <OrbitControls 
           enableRotate={true} 

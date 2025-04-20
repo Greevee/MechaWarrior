@@ -129,10 +129,11 @@ button {
 /* Container für Einheiten-Details/Vorbereitung (unten links) */
 .unit-details {
   left: 20px;
-  width: 250px; /* Feste Breite */
+  width: 750px; /* NEU: 3x Breite (vorher 250px) */
+  /* Inhalt wird jetzt dynamisch basierend auf Auswahl gefüllt */
 }
 
-.unit-details h4, .unit-pool h4 {
+.unit-details h4, .unit-pool h4, .top-center-info h4 {
    margin: -15px -15px 10px -15px; /* Nach oben/außen verschieben */
    padding: 8px 15px;
    background-color: rgba(0, 255, 255, 0.1); /* Hintergrund für Titel */
@@ -440,4 +441,77 @@ button {
   outline: 2px solid yellow;
   box-shadow: 0 0 5px yellow;
 }
-*/ 
+*/
+
+/* NEU: Top-Center Info Panel */
+.top-center-info {
+  composes: hud-element; /* Erbt Basis-HUD-Stile */
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%); /* Zentriert horizontal */
+  width: auto; /* Passt sich Inhalt an */
+  min-width: 250px; /* Mindestbreite */
+  text-align: center;
+}
+
+/* Entferne spezielle Ecken-Regeln, wenn sie stören oder nicht gewünscht sind */
+/* .top-center-info::before, .top-center-info::after { display: none; } */
+
+.top-center-info h4 {
+   margin: -15px -15px 10px -15px; /* Nach oben/außen verschieben */
+   padding: 8px 15px;
+   background-color: rgba(0, 255, 255, 0.1); /* Hintergrund für Titel */
+   border-bottom: 1px solid var(--hud-blue);
+   font-size: 1.1em;
+}
+
+.top-center-info button {
+  background-color: var(--hud-blue-transparent);
+  border: 1px solid var(--hud-blue);
+  color: var(--hud-blue);
+  padding: 5px 10px;
+  margin-top: 10px;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+.top-center-info button:hover {
+  background-color: rgba(0, 255, 255, 0.3);
+  box-shadow: var(--hud-glow);
+}
+
+/* NEU: Layout für Inhalt im Detail-Panel */
+.unit-details-content {
+  display: flex;
+  align-items: flex-start; /* Oben ausrichten */
+  gap: 15px; /* Abstand zwischen Icon und Stats */
+  margin-top: 10px;
+}
+
+.unit-details-icon {
+  width: 60px; /* Feste Breite für Icon */
+  height: 60px; /* Feste Höhe für Icon */
+  object-fit: contain;
+  border: 1px solid var(--hud-blue-transparent);
+  background-color: rgba(0, 0, 0, 0.3);
+  flex-shrink: 0; /* Verhindert, dass Icon schrumpft */
+}
+
+.unit-details-stats {
+  flex-grow: 1; /* Nimmt restlichen Platz ein */
+}
+
+.unit-details-stats p {
+  margin: 3px 0; /* Weniger Abstand zwischen den Stats */
+  font-size: 0.85em;
+}
+
+.unit-details-stats hr {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid var(--hud-blue-transparent);
+}
+
+/* Entferne Button-Styling, da hier keine Buttons mehr standardmäßig sind */
+/* .unit-details button { ... } */ 
+
+/* Container für die Einheiten-Auswahl (Unten rechts) - bleibt meist gleich */
+/* ... */ 

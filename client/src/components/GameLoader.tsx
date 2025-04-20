@@ -5,7 +5,7 @@ import { useTexture, Html } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import GameScreen from './GameScreen';
-import { FigureBehaviorState, PlayerInGame } from '../types/game.types';
+import { FigureBehaviorState, PlayerInGame, PlacedUnit, GamePhase, FigureState } from '../types/game.types';
 import ErrorBoundary from './ErrorBoundary';
 import { socket } from '../socket';
 import './GameScreen.css';
@@ -56,7 +56,7 @@ const formatTime = (seconds: number): string => {
 };
 
 const GameLoader: React.FC = () => {
-    const { gameState } = useGameStore();
+    const { gameState, selectedFigureId, setSelectedFigureId } = useGameStore();
     const { playerId } = usePlayerStore();
 
     // --- Zustand und Logik aus GameScreen hierher verschoben --- 
@@ -64,12 +64,44 @@ const GameLoader: React.FC = () => {
     const [selectedUnitForPlacement, setSelectedUnitForPlacement] = useState<Unit | null>(null);
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
     const battlefieldContainerRef = useRef<HTMLDivElement>(null);
+    const prevPhaseRef = useRef<GamePhase | null>(null);
+    const combatAudioRef = useRef<HTMLAudioElement | null>(null);
 
     // Memoized Spielerdaten
     const selfPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id === playerId), [gameState, playerId]);
     const opponentPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id !== playerId), [gameState, playerId]);
     const availableUnits = useMemo(() => placeholderUnits.filter(unit => unit.faction === selfPlayer?.faction), [selfPlayer]);
     const isHost = useMemo(() => gameState && playerId !== null && gameState.hostId === playerId, [gameState, playerId]);
+
+    // Memoized Daten für die ausgewählte FIGUR (via Klick)
+    const selectedFigureData = useMemo(() => {
+        if (!gameState || !selectedFigureId) return null;
+        let foundFigure: FigureState | null = null;
+        let ownerId: number | null = null;
+
+        for (const player of gameState.players) {
+            for (const unit of player.placedUnits) {
+                const figure = unit.figures.find(f => f.figureId === selectedFigureId);
+                if (figure) {
+                    foundFigure = figure;
+                    ownerId = player.id;
+                    break;
+                }
+            }
+            if (foundFigure) break;
+        }
+
+        if (!foundFigure) return null;
+
+        const baseUnitData = placeholderUnits.find(u => u.id === foundFigure!.unitTypeId);
+        const ownerUsername = gameState.players.find(p => p.id === ownerId)?.username ?? '??';
+
+        return { 
+            figure: foundFigure,
+            baseData: baseUnitData,
+            ownerUsername: ownerUsername
+        };
+    }, [gameState, selectedFigureId]);
 
     // Countdown Timer Effekt
     useEffect(() => {
@@ -85,6 +117,39 @@ const GameLoader: React.FC = () => {
             setTimeRemaining(null);
         }
     }, [gameState?.phase, gameState?.preparationEndTime]);
+
+    // NEU: Effekt zum Abspielen von Musik beim Kampfstart
+    useEffect(() => {
+        const currentPhase = gameState?.phase;
+        const previousPhase = prevPhaseRef.current;
+
+        // Prüfe auf den Phasenwechsel von Preparation zu Combat
+        if (previousPhase === 'Preparation' && currentPhase === 'Combat') {
+            console.log("Combat phase started, playing music...");
+            // Optional: Stoppe vorherige Musik
+            // if (preparationAudioRef.current) preparationAudioRef.current.pause();
+
+            // Erstelle und spiele Kampfmusik
+            if (!combatAudioRef.current) {
+                combatAudioRef.current = new Audio('/assets/music/combat_start.mp3');
+            }
+            combatAudioRef.current.play().catch(error => {
+                console.error("Fehler beim Abspielen der Kampfmusik:", error);
+                // Optional: Fallback oder Nutzerhinweis
+            });
+        } 
+        // Optional: Musik stoppen, wenn Kampf vorbei ist?
+        // else if (previousPhase === 'Combat' && currentPhase !== 'Combat') {
+        //     if (combatAudioRef.current) {
+        //          combatAudioRef.current.pause();
+        //          combatAudioRef.current.currentTime = 0; // Zurücksetzen
+        //     }
+        // }
+
+        // Speichere aktuelle Phase für nächsten Render
+        prevPhaseRef.current = currentPhase ?? null;
+
+    }, [gameState?.phase]); // Abhängig von der Spielphase
 
     // Handler
     const handleUnlockUnit = (unitId: string) => {
@@ -103,6 +168,7 @@ const GameLoader: React.FC = () => {
         if (!selfPlayer.unlockedUnits.includes(unit.id)) return;
         if (selfPlayer.credits < unit.placementCost) return;
         setSelectedUnitForPlacement(unit);
+        setSelectedFigureId(null);
     };
 
     const handleForceStartCombat = () => {
@@ -174,34 +240,53 @@ const GameLoader: React.FC = () => {
                 <p>Credits: {opponentPlayer?.credits ?? '??'}</p>
             </div>
 
-            <div className="game-controls unit-details">
-                {gameState?.phase === 'Preparation' && (
-                    <div className='preparation-controls'>
-                        <h4>Vorbereitung</h4>
-                        {timeRemaining !== null && (
-                            <p>Verbleibende Zeit: <strong>{formatTime(timeRemaining)}</strong></p>
-                        )}
-                        {isHost && (
-                            <button onClick={handleForceStartCombat}>Kampf starten</button>
-                        )}
-                        <hr /> 
-                    </div>
-                )}
-                
-                {selectedUnitForPlacement ? (
+            {/* NEU: Top-Center Panel */}
+            {gameState.phase === 'Preparation' && (
+                <div className="game-info top-center-info"> {/* Neue Klasse und Position */} 
+                    <h4>Vorbereitung</h4>
+                    {timeRemaining !== null && (
+                        <p>Verbleibende Zeit: <strong>{formatTime(timeRemaining)}</strong></p>
+                    )}
+                    {isHost && (
+                        <button onClick={handleForceStartCombat}>Kampf starten</button>
+                    )}
+                </div>
+            )}
+
+            {/* Bottom-Left Panel (Angepasster Inhalt für Figur) */}
+            <div className="game-controls unit-details"> 
+                {selectedFigureData && selectedFigureData.baseData ? (
                     <div>
-                        <h5>Einheit Details</h5>
-                        <p>Platziere: {selectedUnitForPlacement.name}</p>
-                        <p>Kosten: {selectedUnitForPlacement.placementCost} C</p>
-                        <button onClick={() => setSelectedUnitForPlacement(null)}>Abbrechen</button>
+                        <h4>{selectedFigureData.baseData.name}</h4> 
+                        <div className="unit-details-content"> 
+                            <img 
+                                src={`/assets/units/${selectedFigureData.baseData.id}.png`} 
+                                alt={selectedFigureData.baseData.name}
+                                className="unit-details-icon" 
+                                onError={(e) => { e.currentTarget.src = '/assets/units/placeholder/figure_placeholder.png'; }} 
+                            />
+                            <div className="unit-details-stats">
+                                <p>Besitzer: {selectedFigureData.ownerUsername}</p>
+                                <hr style={{borderColor: 'var(--hud-blue-transparent)'}}/>
+                                <p>HP: {selectedFigureData.figure.currentHP} / {selectedFigureData.baseData.hp}</p>
+                                <p>Schaden: {selectedFigureData.baseData.damage}</p>
+                                <p>Reichweite: {selectedFigureData.baseData.range}</p>
+                                <p>Geschw.: {selectedFigureData.baseData.speed}</p>
+                            </div>
+                        </div>
                     </div>
                 ) : (
-                    gameState?.phase !== 'Preparation' && <p>Kampf läuft...</p>
-                )}
+                    <div>
+                        <h4>Einheit Details</h4>
+                        <p>Keine Einheit ausgewählt. Klicke eine Figur im Feld an.</p>
+                    </div>
+                 )}
             </div>
+            
+            {/* Bottom-Right Panel (Unit Pool) - Unverändert in der Struktur */}
             <div className="game-controls unit-pool">
-                <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
-                <div className="unit-tiles-grid"> 
+                 <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
+                 <div className="unit-tiles-grid"> 
                 {availableUnits.map((unit: Unit) => {
                     const isUnlocked = selfPlayer?.unlockedUnits.includes(unit.id); 
                     // console.log(`[GameLoader Render Tile] Einheit: ${unit.id}, isUnlocked: ${isUnlocked}`); // Auskommentiert

@@ -8,6 +8,8 @@ interface GameStoreState {
     setGameState: (newState: ClientGameState) => void;
     updatePlayerState: (playerId: number, updates: Partial<ClientPlayerInGame>) => void;
     resetGame: () => void;
+    selectedFigureId: string | null;
+    setSelectedFigureId: (id: string | null) => void;
     // Ggf. weitere Aktionen für Runden, Phasen etc.
 }
 
@@ -34,4 +36,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         };
     }),
     resetGame: () => set({ gameState: null }),
+    selectedFigureId: null,
+    setSelectedFigureId: (id) => set({ selectedFigureId: id }),
 })); 
