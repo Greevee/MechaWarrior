@@ -92,45 +92,37 @@ const UnitDetailsPanel = React.memo<{
     selectedFigureData: { figure: FigureState, baseData: Unit | undefined, ownerUsername: string } | null, 
     selectedPlacedUnitData: { unit: PlacedUnit, baseData: Unit | undefined } | null 
 }>(({ selectedFigureData, selectedPlacedUnitData }) => {
-     return (
-        <div className="game-controls unit-details"> 
-            {selectedFigureData && selectedFigureData.baseData ? (
-                <div>
-                    <h4>{selectedFigureData.baseData.name}</h4> 
-                    <div className="unit-details-content"> 
-                        <img 
-                            src={`/assets/units/${selectedFigureData.baseData.id}.png`} 
-                            alt={selectedFigureData.baseData.name}
-                            className="unit-details-icon" 
-                            onError={(e) => { e.currentTarget.src = '/assets/units/placeholder/figure_placeholder.png'; }} 
-                        />
-                        <div className="unit-details-stats" style={{ display: 'flex', gap: '20px' }}> 
-                            <div className="stats-column">
-                                <p>HP: {selectedFigureData.figure.currentHP} / {selectedFigureData.baseData.hp}</p>
-                                <p>Schaden (Basis): {selectedFigureData.baseData.damage}</p>
-                                <p>Reichweite: {selectedFigureData.baseData.range}</p>
-                                <p>Geschw.: {selectedFigureData.baseData.speed}</p>
-                            </div>
-                            {/* Integrierte Statistiken (aus zweiter Spalte des vorherigen Panels) */}
-                            {selectedPlacedUnitData && (
-                                <div className="stats-column">
-                                    <p>Schaden (LR): {selectedPlacedUnitData.unit.lastRoundDamageDealt}</p>
-                                    <p>Schaden (Ges): {selectedPlacedUnitData.unit.totalDamageDealt}</p>
-                                    <p>Kills (LR): {selectedPlacedUnitData.unit.lastRoundKills}</p>
-                                    <p>Kills (Ges): {selectedPlacedUnitData.unit.totalKills}</p>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+    let displayData: Unit | undefined;
+    if (selectedFigureData) displayData = selectedFigureData.baseData;
+    else if (selectedPlacedUnitData) displayData = selectedPlacedUnitData.baseData;
+
+    if (!displayData) return <div className="game-info game-controls unit-details"><h4>Einheiten-Details</h4><p>Keine Einheit ausgewählt.</p></div>;
+
+    // NEU: Zugriff auf Waffendaten (erste Waffe als Beispiel)
+    const mainWeapon = displayData.weapons?.[0];
+
+    return (
+        <div className="game-info game-controls unit-details">
+            <h4>{displayData.name}</h4>
+            <div style={{ display: 'flex', gap: '20px' }}>
+                <div className="stats-column">
+                    <p>HP: {displayData.hp}</p>
+                    <p>Rüstung: {displayData.armor * 100}%</p>
+                    <p>Schadenred.: {displayData.damageReduction}</p>
+                    <p>Schild: {displayData.shield}</p>
+                    <p>Typ: {displayData.isAirUnit ? 'Luft' : 'Boden'}</p>
                 </div>
-            ) : (
-                <div>
-                    <h4>Einheit Details</h4>
-                    <p>Keine Einheit ausgewählt. Klicke eine Figur im Feld an.</p>
+                <div className="stats-column">
+                    {/* Verwende mainWeapon für die Stats */} 
+                    <p>Schaden: {mainWeapon?.damage ?? '-'}</p>
+                    <p>Angriffsgeschw.: {mainWeapon?.attackSpeed ?? '-'}</p>
+                    <p>Reichweite: {mainWeapon?.range ?? '-'}</p>
+                    <p>Splash Radius: {mainWeapon?.splashRadius ?? '-'}</p>
+                    <p>Kosten: {displayData.placementCost}</p>
                 </div>
-                )}
+            </div>
         </div>
-     );
+    );
 });
 
 const CreditsDisplayPanel = React.memo<{ credits: number | undefined }>(({ credits }) => {
@@ -362,6 +354,7 @@ const GameLoader: React.FC = () => {
             // Erstelle und spiele Kampfmusik
             if (!combatAudioRef.current) {
                 combatAudioRef.current = new Audio('/assets/music/combat_start.mp3');
+                combatAudioRef.current.volume = 0.25;
             }
             combatAudioRef.current.play().catch(error => {
                 console.error("Fehler beim Abspielen der Kampfmusik:", error);
@@ -453,9 +446,13 @@ const GameLoader: React.FC = () => {
             behaviors.forEach(behavior => {
                 paths.push(`/assets/units/${unit.id}/${behavior}.png`);
             });
-            if (unit.attackSpeed > 0) { 
-                paths.push(`/assets/projectiles/${unit.id}_projectile.png`);
+            // NEU: Prüfe, ob die erste Waffe ein Projektilbild hat
+            const mainWeapon = unit.weapons?.[0];
+            if (mainWeapon?.projectileRenderType === 'image' && mainWeapon?.projectileImagePath) {
+                 // Pfad für Projektilbild hinzufügen (verwende weaponId)
+                 paths.push(`/assets/weapons/projectiles/${mainWeapon.id}_projectile.png`);
             }
+            // Pfad für Einheiten-Icon (bleibt gleich)
             paths.push(`/assets/units/${unit.id}.png`);
         });
         paths.push('/assets/units/placeholder/figure_placeholder.png');

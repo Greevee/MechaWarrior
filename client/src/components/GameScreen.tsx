@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, Suspense, useCallback } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats, Sky } from '@react-three/drei';
+import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats, Sky, PositionalAudio } from '@react-three/drei';
 import * as THREE from 'three';
 import { PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState, GamePhase } from '../types/game.types';
 import { placeholderUnits, Unit, Weapon } from '../../../server/src/units/unit.types';
@@ -103,6 +103,7 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
     isAirUnit, // Empfangen
 }) => {
     const meshRef = useRef<THREE.Group>(null!);
+    const audioRef = useRef<THREE.PositionalAudio>(null!); // NEU: Ref für Audio
     // NEU: Berechne Basis-Y-Position inkl. Flughöhe
     const baseYPosition = useMemo(() => {
         return (isAirUnit ? FLIGHT_HEIGHT : 0) + spriteHeight / 2;
@@ -131,23 +132,35 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
         }
     }, [spriteTexture]);
 
-    // Effekt zum Starten der Rückstoßanimation - Reaktiviert & Modifiziert
+    // Effekt zum Starten der Rückstoßanimation UND Abspielen des Feuer-Sounds
     useEffect(() => {
         // +++ Debug Log +++
-        console.log(`FigureSprite ${figureId}: useEffect triggered. mainWpnId=${mainWeaponId}`, weaponCooldowns);
+        // console.log(`FigureSprite ${figureId}: useEffect triggered. mainWpnId=${mainWeaponId}`, weaponCooldowns);
         // Prüfe nur, wenn eine Hauptwaffe definiert ist
         if (mainWeaponId) {
             const currentCooldown = weaponCooldowns[mainWeaponId] ?? 0;
             const prevCooldown = prevWeaponCooldownsRef.current[mainWeaponId] ?? 0;
 
             // +++ Debug Log +++
-            console.log(`FigureSprite ${figureId}: Checking cooldowns. Current=${currentCooldown}, Prev=${prevCooldown}`);
+            // console.log(`FigureSprite ${figureId}: Checking cooldowns. Current=${currentCooldown}, Prev=${prevCooldown}`);
 
             // Wenn der Cooldown gestiegen ist, hat die Hauptwaffe gefeuert
             if (currentCooldown > prevCooldown) {
                 // +++ Debug Log +++
-                console.log(`FigureSprite ${figureId}: Main weapon ${mainWeaponId} fired! Starting recoil at ${Date.now()}.`);
+                // console.log(`FigureSprite ${figureId}: Main weapon ${mainWeaponId} fired! Starting recoil at ${Date.now()}.`);
                 recoilStartTime.current = Date.now();
+                // NEU: Feuer-Sound abspielen mit try...catch
+                if (audioRef.current) {
+                    try {
+                        if (audioRef.current.isPlaying) {
+                            audioRef.current.stop();
+                        }
+                        audioRef.current.play();
+                        // console.log(`FigureSprite ${figureId}: Playing fire sound for ${mainWeaponId}`); // Optionales Logging
+                    } catch (error) {
+                        console.error(`FigureSprite ${figureId}: Fehler beim Abspielen des Feuer-Sounds (${mainWeaponId}):`, error);
+                    }
+                }
             }
         }
 
@@ -218,6 +231,12 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
         }
     });
 
+    // NEU: Bestimme den Sound-Pfad basierend auf der Hauptwaffe
+    const fireSoundUrl = useMemo(() => {
+        if (!mainWeaponId) return '';
+        return `/assets/sounds/fire_${mainWeaponId}.ogg`; // Annahme: .ogg Format
+    }, [mainWeaponId]);
+
     return (
         <group ref={meshRef} onClick={onClick}>
             <Billboard>
@@ -235,6 +254,22 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
                     />
                 </Plane>
             </Billboard>
+            {/* NEU: PositionalAudio für Feuer-Sound hinzufügen, mit eigener ErrorBoundary */} 
+            {fireSoundUrl && (
+                <ErrorBoundary fallback={null} logErrors={false}> {/* Fängt Audio-Ladefehler ab */} 
+                    <Suspense fallback={null}> {/* Minimaler Suspense für Audio */} 
+                        <PositionalAudio
+                            ref={audioRef}
+                            url={fireSoundUrl}
+                            distance={1} // Ab welcher Distanz die Lautstärke abnimmt
+                            loop={false} // Sound nicht loopen
+                            // Entfernungseinstellungen anpassen:
+                            // refDistance={5}
+                            // rolloffFactor={2}
+                        />
+                    </Suspense>
+                </ErrorBoundary>
+            )}
         </group>
     );
 });
@@ -722,9 +757,8 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({
 interface ImpactEffectProps {
     id: string; // Eindeutige ID für diesen Effekt
     position: THREE.Vector3;
-    // unitTypeId wird nicht mehr benötigt, wenn impactTexturePath vorhanden ist
-    // unitTypeId?: string; 
     impactTexturePath: string; // NEU: Erforderlicher Pfad zur Textur
+    impactSoundPath?: string; // NEU: Optionaler Pfad zum Sound
     onComplete: (id: string) => void; // Callback zum Entfernen
     duration?: number; // Dauer des Effekts in Sekunden
     scale?: number; // NEU: Skalierungsfaktor für das Sprite
@@ -733,16 +767,16 @@ interface ImpactEffectProps {
 const ImpactEffect: React.FC<ImpactEffectProps> = ({ 
     id, 
     position, 
-    // unitTypeId, // Entfernt
     impactTexturePath, // NEU
+    impactSoundPath, // NEU: Empfangen
     onComplete, 
     duration = 1.0, // Dauer jetzt 1 Sekunde
     scale = 1.0, // NEU: Standard-Skalierung
 }) => {
-    const meshRef = useRef<THREE.Mesh>(null!);
-    const materialRef = useRef<THREE.MeshBasicMaterial>(null!);
+    const meshRef = useRef<THREE.Mesh>(null!); // Ref für visuelles Mesh
+    const audioRef = useRef<THREE.PositionalAudio>(null!); // NEU: Ref für Audio
+    const materialRef = useRef<THREE.MeshBasicMaterial>(null!); // Ref für Material (Opacity)
     const startTime = useRef(Date.now());
-    // Korrigierter Pfad:
     const texturePath = `/assets/${impactTexturePath}`;
 
     // Lade die Impact-Textur
@@ -766,6 +800,20 @@ const ImpactEffect: React.FC<ImpactEffectProps> = ({
         }
     }, [impactTexture]);
 
+    // NEU: Effekt zum Abspielen des Sounds beim Mounten
+    useEffect(() => {
+        if (audioRef.current && impactSoundPath) {
+            // NEU: try...catch um play()
+            try {
+                audioRef.current.play();
+                // console.log(`ImpactEffect ${id}: Playing impact sound ${impactSoundPath}`); // Optionales Logging
+            } catch (error) {
+                 console.error(`ImpactEffect ${id}: Fehler beim Abspielen des Impact-Sounds (${impactSoundPath}):`, error);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Nur einmal beim Mounten ausführen
+
     useFrame(() => {
         const elapsedTime = (Date.now() - startTime.current) / 1000; // Zeit in Sekunden
         const progress = Math.min(1, elapsedTime / duration); // Progress wieder berechnen
@@ -784,10 +832,11 @@ const ImpactEffect: React.FC<ImpactEffectProps> = ({
 
     // Wir verwenden jetzt Billboard, damit die Grafik immer zur Kamera zeigt.
     return (
-        <Billboard position={position}> {/* Billboard umschließt jetzt die Plane */} 
-             <mesh ref={meshRef}> {/* Mesh ist jetzt innerhalb von Billboard, nur für Refs? Oder direkt Plane? */} 
-                <Plane args={[spriteWidth, spriteHeight]}>
-                    <meshBasicMaterial
+        <Billboard position={position}> 
+            {/* Visuelles Mesh bleibt gleich */} 
+            <mesh ref={meshRef}>
+                 <Plane args={[spriteWidth, spriteHeight]}>
+                     <meshBasicMaterial
                         ref={materialRef}
                         map={impactTexture}
                         transparent={true}
@@ -795,9 +844,23 @@ const ImpactEffect: React.FC<ImpactEffectProps> = ({
                         side={THREE.DoubleSide}
                         alphaTest={0.1} 
                         depthWrite={false} 
-                    />
-                </Plane>
-            </mesh>
+                     />
+                 </Plane>
+             </mesh>
+            {/* NEU: PositionalAudio für Impact-Sound hinzufügen, mit eigener ErrorBoundary */} 
+            {impactSoundPath && (
+                 <ErrorBoundary fallback={null} logErrors={false}> {/* Fängt Audio-Ladefehler ab */} 
+                     <Suspense fallback={null}> {/* Minimaler Suspense für Audio */} 
+                        <PositionalAudio
+                            ref={audioRef}
+                            url={impactSoundPath}
+                            distance={1} // Ab welcher Distanz die Lautstärke abnimmt
+                            loop={false} // Sound nicht loopen
+                            // Ggf. andere Entfernungseinstellungen wie beim Feuer-Sound
+                        />
+                     </Suspense>
+                </ErrorBoundary>
+            )}
         </Billboard>
     );
 };
@@ -871,6 +934,7 @@ interface ActiveImpactEffect {
     unitTypeId: string;
     impactTexturePath?: string;
     scale?: number; // NEU: Skalierungsfaktor für den Effekt
+    impactSoundPath?: string; // NEU: Pfad zum Impact-Sound
 }
 
 // NEU: Komponente für die umgebende Landschaft
@@ -1000,6 +1064,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
                 // Prüfe, ob Impact-Effekt angezeigt werden soll (inkl. Pfad-Check)
                 if (unitData && weapon?.impactEffectImage && weapon.impactEffectImagePath) {
                     const path = weapon.impactEffectImagePath;
+                    // NEU: Bestimme auch den Sound-Pfad
+                    const soundPath = `/assets/sounds/impact_${weapon.id}.ogg`;
                     // Erstelle Position aus dem *vorherigen* Projektilzustand
                     const impactPosition = new THREE.Vector3(
                         prevProjectile.currentPos.x,
@@ -1013,8 +1079,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
                         position: impactPosition,
                         unitTypeId: unitData.id,
                         impactTexturePath: path,
-                        // NEU: Skalierungsfaktor von der Waffe holen (mit Default)
-                        scale: weapon.impactEffectImageScale ?? 1.0 
+                        scale: weapon.impactEffectImageScale ?? 1.0, 
+                        impactSoundPath: soundPath // NEU: Sound-Pfad hinzufügen
                     };
                     
                     // +++ Debug Log +++
@@ -1223,8 +1289,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
                             key={effect.id} // Eindeutiger Key für den Effekt selbst
                             id={effect.id}
                             position={effect.position}
-                            // Korrekte Prop übergeben:
                             impactTexturePath={effect.impactTexturePath} 
+                            impactSoundPath={effect.impactSoundPath} // NEU: Übergeben
                             onComplete={handleImpactComplete}
                             scale={effect.scale}
                         />
