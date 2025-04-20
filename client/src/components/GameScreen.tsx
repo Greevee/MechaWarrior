@@ -361,77 +361,107 @@ const formatTime = (seconds: number): string => {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 };
 
-// --- Projectile Mesh Component ---
-const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = React.memo(({ projectile }) => {
-    const meshRef = useRef<THREE.Group>(null!); 
-    // Ähnliche Interpolation wie bei Figuren
-    const interpolatedPosition = useRef(new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z));
-    const targetPosition = useMemo(() => new THREE.Vector3(projectile.currentPos.x, 0.5, projectile.currentPos.z), [
-        projectile.currentPos.x, projectile.currentPos.z
-    ]);
+// +++ NEU: Instanced Projectile Component +++
+interface InstancedProjectileMeshesProps {
+    unitTypeId: string;
+    projectiles: ProjectileState[];
+}
 
-     // --- Sprite Loading ---
-    // Erstelle den Pfad zur Projektil-Grafik dynamisch
-    const getProjectileTexturePath = (unitTypeId: string): string => {
-        // Annahme: /assets/projectiles/{unitTypeId}_projectile.png
-        // TODO: Bessere Fehlerbehandlung / Fallback
-        console.log(`Generiere Projektil-Pfad für useTexture: /assets/projectiles/${unitTypeId}_projectile.png`);
-        return `/assets/projectiles/${unitTypeId}_projectile.png`;
+const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = React.memo(({ unitTypeId, projectiles }) => {
+    const meshRef = useRef<THREE.InstancedMesh>(null!); // Ref für InstancedMesh
+    const dummyObject = useMemo(() => new THREE.Object3D(), []); // Hilfsobjekt für Matrix-Berechnung
+
+    // --- Sprite Loading (nur einmal pro Typ) ---
+    const getProjectileTexturePath = (typeId: string): string => {
+        return `/assets/projectiles/${typeId}_projectile.png`;
     };
+    const texturePath = useMemo(() => getProjectileTexturePath(unitTypeId), [unitTypeId]);
+    const spriteTexture = useTexture(texturePath); 
 
-    const texturePath = useMemo(() => {
-        return getProjectileTexturePath(projectile.unitTypeId);
-    }, [projectile.unitTypeId]);
-
-    // Lade die dynamische Textur
-    // Fehler werden durch Suspense/ErrorBoundary außen behandelt
-    const spriteTexture = useTexture(texturePath);
-
-    // Ladefehler abfangen und Standardwerte verwenden
     const aspectWidth = spriteTexture?.image?.width ?? 1;
     const aspectHeight = spriteTexture?.image?.height ?? 1;
     const spriteAspect = aspectWidth / aspectHeight;
-
     const spriteHeight = 0.3; // Feste Größe für Projektile?
     const spriteWidth = spriteHeight * spriteAspect;
-    const yOffset = spriteHeight / 2; // Höhe anpassen
+    const yOffset = spriteHeight / 2;
 
-    // Effekt zum Setzen des Farbraums der Textur
+    // Textur-Setup
     useEffect(() => {
         if (spriteTexture) {
-            spriteTexture.colorSpace = THREE.SRGBColorSpace; // Explizit setzen
+            spriteTexture.colorSpace = THREE.SRGBColorSpace;
             spriteTexture.needsUpdate = true;
         }
     }, [spriteTexture]);
 
+    // --- Instanz-Updates (jetzt in useFrame) ---
     useFrame((state, delta) => {
-         // Höhe in Zielposition berücksichtigen
-        targetPosition.set(projectile.currentPos.x, yOffset, projectile.currentPos.z);
-        // Interpolation hinzufügen, um die Bewegung zu glätten
-        interpolatedPosition.current.lerp(targetPosition, 0.3); // Faktor ggf. anpassen
+        if (!meshRef.current || projectiles.length === 0) return;
 
-        if (meshRef.current) {
-            meshRef.current.position.copy(interpolatedPosition.current);
-        }
+        // Holen der Kamera-Position für Billboard-Effekt
+        const cameraPosition = state.camera.position;
+
+        projectiles.forEach((projectile, i) => {
+            // Sicherheitscheck: Index muss im gültigen Bereich des InstancedMesh liegen
+            if (i >= meshRef.current!.count) return;
+            
+            // Holen der letzten Matrix und Position
+            meshRef.current!.getMatrixAt(i, dummyObject.matrix); 
+            dummyObject.position.setFromMatrixPosition(dummyObject.matrix);
+            
+            // Ziel ist die aktuelle Position vom Server
+            // WICHTIG: Die yOffset muss hier angewendet werden!
+            const targetX = projectile.currentPos.x;
+            const targetY = yOffset; // Ziel-Y ist der Offset
+            const targetZ = projectile.currentPos.z;
+
+            // Interpolieren zur Zielposition
+            // Wir verwenden einen temporären Vektor, um das Ziel zu setzen
+            const targetPositionVec = new THREE.Vector3(targetX, targetY, targetZ);
+            dummyObject.position.lerp(targetPositionVec, 0.3); // Behalte LERP für Glättung
+
+            // Billboard-Effekt: Richte Instanz zur Kamera aus
+            dummyObject.lookAt(cameraPosition);
+
+            // Matrix aktualisieren
+            dummyObject.updateMatrix();
+            meshRef.current!.setMatrixAt(i, dummyObject.matrix);
+        });
+
+        // Wichtig: Flag setzen, damit Three.js die Änderungen übernimmt
+        meshRef.current.instanceMatrix.needsUpdate = true;
     });
 
+    // Wir brauchen eine Geometrie und ein Material
+    const planeGeometry = useMemo(() => new THREE.PlaneGeometry(spriteWidth, spriteHeight), [spriteWidth, spriteHeight]);
+    const meshMaterial = useMemo(() => new THREE.MeshBasicMaterial({
+        map: spriteTexture,
+        color: "white",
+        transparent: true,
+        side: THREE.DoubleSide,
+        alphaTest: 0.1,
+        depthWrite: false // Oft gut für transparente Partikel/Billboards
+    }), [spriteTexture]);
+
+    // Rendere nichts, wenn keine Projektile da sind
+    if (projectiles.length === 0) {
+        return null;
+    }
+
+    // InstancedMesh benötigt count und die Geometrie/Material-Args
+    // WICHTIG: Billboard-Verhalten müssen wir manuell in Matrix umsetzen oder Billboard um InstancedMesh?
+    // Billboard um InstancedMesh funktioniert NICHT. Billboard muss pro Instanz passieren.
+    // Einfachster Weg: Gar kein Billboard, Projektile schauen immer in eine Richtung (Y-Achse?).
+    // Oder komplexer: In useFrame die Matrix jeder Instanz so rotieren, dass sie zur Kamera zeigt.
+    // Kompromiss: Wir lassen Billboard erstmal weg, schauen, wie es aussieht.
     return (
-        // Group wird positioniert
-        <group ref={meshRef} position={[interpolatedPosition.current.x, yOffset, interpolatedPosition.current.z]}>
-             <Billboard>
-                <Plane args={[spriteWidth, spriteHeight]}>
-                     <meshBasicMaterial 
-                        color="white" // Explizit auf Weiß setzen
-                        map={spriteTexture} 
-                        transparent={true} 
-                        side={THREE.DoubleSide} 
-                        alphaTest={0.1} 
-                    />
-                </Plane>
-            </Billboard>
-        </group>
+        <instancedMesh 
+            ref={meshRef} 
+            args={[planeGeometry, meshMaterial, projectiles.length]} // Geometrie, Material, Anzahl
+            frustumCulled={false} // Performance: Verhindert, dass Instanzen verschwinden, wenn Zentrum außerhalb des Sichtfelds ist
+        />
     );
 });
+// +++ Ende Instanced Projectile Component +++
 
 // NEU: Impact Effect Component
 interface ImpactEffectProps {
@@ -636,6 +666,18 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
   const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); 
 
+  // NEU: Gruppiere Projektile nach unitTypeId
+  const groupedProjectiles = useMemo(() => {
+    const groups: { [key: string]: ProjectileState[] } = {};
+    activeProjectiles.forEach(p => {
+        if (!groups[p.unitTypeId]) {
+            groups[p.unitTypeId] = [];
+        }
+        groups[p.unitTypeId].push(p);
+    });
+    return groups;
+  }, [activeProjectiles]);
+
   // Update der aktuell gerenderten Projektil-IDs bei jeder Änderung
    useEffect(() => {
         currentProjectileIdsRef.current = new Set(activeProjectiles.map(p => p.projectileId));
@@ -781,40 +823,46 @@ const GameScreen: React.FC<GameScreenProps> = ({
             />
         ))}
 
-        {/* Aktive Projektile */}
-        {activeProjectiles.map(projectile => {
-            // Finde Unit-Daten, um zu prüfen, ob ein Projektil überhaupt gerendert werden soll
-             const unitData = placeholderUnits.find(u => u.id === projectile.unitTypeId);
-             // Wenn keine Unit-Daten gefunden oder keine Projektil-Grafik erwartet wird, überspringen?
-             // Oder Fallback verwenden? Hier wird aktuell immer versucht zu rendern.
+        {/* NEU: Aktive Projektile (Instanced) */}
+        {Object.entries(groupedProjectiles).map(([unitTypeId, projectilesOfType]) => {
+            // Finde Unit-Daten für Fallback / Suspense (wie zuvor)
+             const unitData = placeholderUnits.find(u => u.id === unitTypeId);
              // TODO: Ggf. Logik hinzufügen, um Projektile ohne Grafik nicht zu rendern.
+            
+             // Key für die Gruppe
+             const groupKey = `projectiles-${unitTypeId}`;
 
             return (
                 <ErrorBoundary
-                    key={`${projectile.projectileId}-boundary`}
-                    fallback={/* ... (Fallback bleibt gleich) ... */
-                        <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
-                            <sphereGeometry args={[0.1, 8, 8]} />
+                    key={`${groupKey}-boundary`}
+                    fallback={
+                        // Einfacher Fallback für die *gesamte Gruppe* dieses Typs
+                        // Wir können hier nicht mehr pro Projektil einen Fallback rendern.
+                        // Zeige eine einzelne rote Kugel als Hinweis?
+                         <mesh position={[0, 0.5, 25]}> {/* Beispielposition Mitte */}
+                            <sphereGeometry args={[0.2, 8, 8]} />
                             <meshStandardMaterial color="red" />
                         </mesh>
                     }
                 >
-                    <Suspense fallback={/* ... (Fallback bleibt gleich) ... */
-                         <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
-                            <sphereGeometry args={[0.1, 8, 8]} />
+                    <Suspense fallback={
+                         // Fallback, während die EINE Textur für diesen Typ lädt
+                         <mesh position={[0, 0.5, 25]}> {/* Beispielposition Mitte */}
+                            <sphereGeometry args={[0.2, 8, 8]} />
                             <meshStandardMaterial color="yellow" wireframe />
                         </mesh>
                     }>
-                        <ProjectileMesh 
-                            key={projectile.projectileId} // Key bleibt hier wichtig für React
-                            projectile={projectile}
+                        <InstancedProjectileMeshes 
+                            key={groupKey} // React Key für die Komponente
+                            unitTypeId={unitTypeId}
+                            projectiles={projectilesOfType}
                         />
                     </Suspense>
                 </ErrorBoundary>
             );
         })}
         
-        {/* NEU: Aktive Impact-Effekte rendern */}
+        {/* NEU: Aktive Impact-Effekte rendern (bleibt unverändert) */} 
         {activeImpactEffects.map(effect => {
              // Finde Unit-Daten für den Fallback / Suspense
             const unitData = placeholderUnits.find(u => u.id === effect.unitTypeId);

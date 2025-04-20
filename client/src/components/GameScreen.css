@@ -313,7 +313,6 @@ button {
 }
 
 .unit-details {
-  bottom: 10px;
   left: 10px;
   max-height: 300px; /* Beispiel: Höhe begrenzen */
   overflow-y: auto; /* Scrollbar bei Bedarf */
