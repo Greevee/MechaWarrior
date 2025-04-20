@@ -122,18 +122,35 @@ export class GameManager {
 
     public startCombatPhase(gameId: string): void {
         const gameState = this.activeGames.get(gameId);
-        if (gameState && gameState.phase === 'Preparation') {
-            console.log(`GameManager: Spiel ${gameId}: Starte Kampfphase.`);
-            this.clearPreparationTimer(gameId); // Timer stoppen
-
-            gameState.players.forEach(player => {
-                player.unitsAtCombatStart = JSON.parse(JSON.stringify(player.placedUnits));
-            });
-            
-            gameState.phase = 'Combat';
-            gameState.preparationEndTime = undefined;
-            this.emitGameStateUpdate(gameId, gameState);
+        if (!gameState || gameState.phase !== 'Preparation') {
+             console.log(`GameManager: startCombatPhase für ${gameId} abgebrochen (falsche Phase oder Spiel nicht gefunden).`);
+             return;
         }
+
+        let allPlayersHaveZeroUnits = true;
+        gameState.players.forEach(player => {
+            if (player.placedUnits.length > 0) {
+                allPlayersHaveZeroUnits = false;
+            }
+        });
+
+        if (allPlayersHaveZeroUnits) {
+            console.log(`GameManager: Spiel ${gameId}: Kampfphase übersprungen, da keine Einheiten platziert wurden. Runde ${gameState.round} wird sofort beendet.`);
+            this.clearPreparationTimer(gameId);
+            this.resetGameToPreparation(gameId);
+            return;
+        }
+
+        console.log(`GameManager: Spiel ${gameId}: Starte Kampfphase.`);
+        this.clearPreparationTimer(gameId);
+
+        gameState.players.forEach(player => {
+            player.unitsAtCombatStart = JSON.parse(JSON.stringify(player.placedUnits));
+        });
+        
+        gameState.phase = 'Combat';
+        gameState.preparationEndTime = undefined;
+        this.emitGameStateUpdate(gameId, gameState);
     }
 
     public forceStartCombat(gameId: string, requestingPlayerId: number): { success: boolean, message?: string } {

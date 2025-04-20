@@ -296,7 +296,7 @@ button {
 .game-controls {
   position: absolute; 
   z-index: 1; 
-  width: 180px; /* Breite reduziert (vorher 250px) */
+  width: 550px; /* Breite reduziert (vorher 250px) */
   border: 1px solid #777;
   padding: 10px;
   background-color: rgba(17, 63, 91, 0.8); 
@@ -554,4 +554,32 @@ button {
 
   /* Optional: Eigene Ecken/Verzierungen, wenn gewünscht */
   /* .credits-display::before, .credits-display::after { display: none; } */
-} 
+}
+
+/* NEU: Styling für Phasenanzeige */
+.phase-indicator {
+  position: absolute;
+  top: 25%; /* NEU: Weiter oben (vorher 40%) */
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100; /* Sollte über allem liegen */
+  background-color: var(--hud-bg);
+  border: 2px solid var(--hud-blue);
+  padding: 20px 40px;
+  color: var(--hud-blue);
+  font-size: 2.5em; /* Große Schrift */
+  font-weight: bold;
+  text-align: center;
+  box-shadow: var(--hud-glow), 0 0 20px rgba(0, 0, 0, 0.5);
+  text-shadow: var(--hud-text-glow);
+  /* Optional: Fade-in/out Animation */
+  /* animation: fadeInOut 3s ease-in-out forwards; */
+}
+
+/* Optional: Keyframes für Animation */
+/* @keyframes fadeInOut {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  15% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  85% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+} */ 

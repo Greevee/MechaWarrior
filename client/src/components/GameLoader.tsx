@@ -66,6 +66,10 @@ const GameLoader: React.FC = () => {
     const battlefieldContainerRef = useRef<HTMLDivElement>(null);
     const prevPhaseRef = useRef<GamePhase | null>(null);
     const combatAudioRef = useRef<HTMLAudioElement | null>(null);
+    // NEU: Zustand für Phasenanzeige
+    const [displayedPhase, setDisplayedPhase] = useState<string | null>(null);
+    const [showPhaseIndicator, setShowPhaseIndicator] = useState<boolean>(false);
+    const phaseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Memoized Spielerdaten
     const selfPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id === playerId), [gameState, playerId]);
@@ -118,12 +122,26 @@ const GameLoader: React.FC = () => {
         }
     }, [gameState?.phase, gameState?.preparationEndTime]);
 
-    // NEU: Effekt zum Abspielen von Musik beim Kampfstart
+    // Effekt für Phasenwechsel (Anzeige-Text setzen & Musik)
     useEffect(() => {
         const currentPhase = gameState?.phase;
         const previousPhase = prevPhaseRef.current;
 
-        // Prüfe auf den Phasenwechsel von Preparation zu Combat
+        // Phasenanzeige Logik - Nur Text setzen und Sichtbarkeit triggern
+        if (currentPhase && currentPhase !== previousPhase) {
+            let phaseText = '';
+            switch (currentPhase) {
+                case 'Preparation': phaseText = `Runde ${gameState?.round} - Vorbereitung`; break;
+                case 'Combat': phaseText = `Runde ${gameState?.round} - Kampf beginnt!`; break;
+                case 'GameOver': phaseText = 'Spiel vorbei!'; break;
+                default: phaseText = currentPhase; break;
+            }
+            
+            setDisplayedPhase(phaseText);
+            setShowPhaseIndicator(true); // Löst den nächsten Effekt aus
+        }
+
+        // Musik Logik (unverändert)
         if (previousPhase === 'Preparation' && currentPhase === 'Combat') {
             console.log("Combat phase started, playing music...");
             // Optional: Stoppe vorherige Musik
@@ -149,7 +167,28 @@ const GameLoader: React.FC = () => {
         // Speichere aktuelle Phase für nächsten Render
         prevPhaseRef.current = currentPhase ?? null;
 
-    }, [gameState?.phase]); // Abhängig von der Spielphase
+    }, [gameState?.phase, gameState?.round]); // Abhängig von Phase und Runde (für Rundennummer)
+
+    // NEU: Separater Effekt für das Ausblenden per Timeout
+    useEffect(() => {
+        // Wenn der Indikator sichtbar werden soll...
+        if (showPhaseIndicator) {
+            // ... lösche alten Timeout (falls vorhanden) und starte neuen.
+            if (phaseTimeoutRef.current) {
+                clearTimeout(phaseTimeoutRef.current);
+            }
+            phaseTimeoutRef.current = setTimeout(() => {
+                setShowPhaseIndicator(false);
+            }, 3000); // 3 Sekunden anzeigen
+        }
+
+        // Cleanup: Timeout löschen, wenn Komponente unmountet oder showPhaseIndicator false wird
+        return () => {
+             if (phaseTimeoutRef.current) {
+                clearTimeout(phaseTimeoutRef.current);
+            }
+        };
+    }, [showPhaseIndicator]); // Abhängig vom Sichtbarkeits-Status
 
     // Handler
     const handleUnlockUnit = (unitId: string) => {
@@ -250,6 +289,13 @@ const GameLoader: React.FC = () => {
                     )}
                 </div>
             )}
+
+            {/* NEU: Phasenindikator */} 
+             {showPhaseIndicator && (
+                <div className="phase-indicator">
+                    {displayedPhase}
+                </div>
+             )}
 
             {/* Bottom-Left Panel (Angepasster Inhalt für Figur) */}
             <div className="game-controls unit-details"> 
