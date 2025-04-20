@@ -1,4 +1,4 @@
-import React, { useMemo, Suspense, useState, useEffect, useRef } from 'react';
+import React, { useMemo, Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useTexture, Html } from '@react-three/drei';
@@ -55,6 +55,216 @@ const formatTime = (seconds: number): string => {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 };
 
+// +++ NEU: Memoized UI-Komponenten +++
+
+const PlayerInfoPanel = React.memo<{ player: PlayerInGame | undefined, isSelf: boolean }>(({ player, isSelf }) => {
+    return (
+        <div className={`game-info ${isSelf ? 'player-info' : 'opponent-info'}`}>
+            <h3>{player?.username || (isSelf ? 'Spieler' : 'Gegner')} {isSelf && '(Du)'}</h3>
+            <p>HP: {player?.baseHealth ?? '??'}</p>
+        </div>
+    );
+});
+
+const SelectedUnitStatsPanel = React.memo<{ data: { unit: PlacedUnit, baseData: Unit | undefined } | null }>(({ data }) => {
+    if (!data) return null;
+    return (
+        <div className="game-info selected-unit-stats">
+            <h4>Ausgewählte Einheit</h4>
+            <p>Typ: {data.baseData?.name ?? data.unit.unitId}</p>
+            {/* Zweispaltiges Layout für Stats (wie zuvor implementiert) */}
+             <div style={{ display: 'flex', gap: '20px' }}>
+                 <div className="stats-column">
+                    {/* Optional: Hier Basiswerte anzeigen, wenn gewünscht */}
+                 </div>
+                 <div className="stats-column">
+                    <p>Schaden (LR): {data.unit.lastRoundDamageDealt}</p>
+                    <p>Schaden (Ges): {data.unit.totalDamageDealt}</p>
+                    <p>Kills (LR): {data.unit.lastRoundKills}</p>
+                    <p>Kills (Ges): {data.unit.totalKills}</p>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+const UnitDetailsPanel = React.memo<{ 
+    selectedFigureData: { figure: FigureState, baseData: Unit | undefined, ownerUsername: string } | null, 
+    selectedPlacedUnitData: { unit: PlacedUnit, baseData: Unit | undefined } | null 
+}>(({ selectedFigureData, selectedPlacedUnitData }) => {
+     return (
+        <div className="game-controls unit-details"> 
+            {selectedFigureData && selectedFigureData.baseData ? (
+                <div>
+                    <h4>{selectedFigureData.baseData.name}</h4> 
+                    <div className="unit-details-content"> 
+                        <img 
+                            src={`/assets/units/${selectedFigureData.baseData.id}.png`} 
+                            alt={selectedFigureData.baseData.name}
+                            className="unit-details-icon" 
+                            onError={(e) => { e.currentTarget.src = '/assets/units/placeholder/figure_placeholder.png'; }} 
+                        />
+                        <div className="unit-details-stats" style={{ display: 'flex', gap: '20px' }}> 
+                            <div className="stats-column">
+                                <p>HP: {selectedFigureData.figure.currentHP} / {selectedFigureData.baseData.hp}</p>
+                                <p>Schaden (Basis): {selectedFigureData.baseData.damage}</p>
+                                <p>Reichweite: {selectedFigureData.baseData.range}</p>
+                                <p>Geschw.: {selectedFigureData.baseData.speed}</p>
+                            </div>
+                            {/* Integrierte Statistiken (aus zweiter Spalte des vorherigen Panels) */}
+                            {selectedPlacedUnitData && (
+                                <div className="stats-column">
+                                    <p>Schaden (LR): {selectedPlacedUnitData.unit.lastRoundDamageDealt}</p>
+                                    <p>Schaden (Ges): {selectedPlacedUnitData.unit.totalDamageDealt}</p>
+                                    <p>Kills (LR): {selectedPlacedUnitData.unit.lastRoundKills}</p>
+                                    <p>Kills (Ges): {selectedPlacedUnitData.unit.totalKills}</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div>
+                    <h4>Einheit Details</h4>
+                    <p>Keine Einheit ausgewählt. Klicke eine Figur im Feld an.</p>
+                </div>
+                )}
+        </div>
+     );
+});
+
+const CreditsDisplayPanel = React.memo<{ credits: number | undefined }>(({ credits }) => {
+    if (credits === undefined) return null;
+    return (
+        <div className="game-controls credits-display"> 
+            <span>Credits: {credits} C</span>
+        </div>
+    );
+});
+
+const UnitPoolPanel = React.memo<{ 
+    availableUnits: Unit[], 
+    selfPlayer: PlayerInGame | undefined, 
+    isUnlocking: string | null, 
+    selectedUnitForPlacement: Unit | null,
+    onUnlockUnit: (unitId: string) => void,
+    onSelectUnitForPlacement: (unit: Unit | null) => void // Erlaube null zum Deselektieren
+}>(({ 
+    availableUnits, 
+    selfPlayer, 
+    isUnlocking, 
+    selectedUnitForPlacement,
+    onUnlockUnit,
+    onSelectUnitForPlacement
+}) => {
+    return (
+        <div className="game-controls unit-pool">
+            <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
+            <div className="unit-tiles-grid"> 
+                {availableUnits.map((unit: Unit) => {
+                    const isUnlocked = selfPlayer?.unlockedUnits.includes(unit.id);
+                    const canAffordUnlock = selfPlayer ? selfPlayer.credits >= unit.unlockCost : false;
+                    const canAffordPlacement = selfPlayer ? selfPlayer.credits >= unit.placementCost : false;
+                    const unlockingThis = isUnlocking === unit.id;
+                    const isSelectedForPlacement = selectedUnitForPlacement?.id === unit.id;
+                    const canPlaceMore = selfPlayer ? selfPlayer.unitsPlacedThisRound < PLACEMENT_LIMIT_PER_ROUND : false;
+
+                    const isDisabled = unlockingThis ||
+                        (!isUnlocked && !canAffordUnlock) ||
+                        (isUnlocked && (!canAffordPlacement || !canPlaceMore)) || // Check Platzierungslimit
+                        (isUnlocked && !!selectedUnitForPlacement && !isSelectedForPlacement);
+
+                    const handleClick = () => {
+                        if (!isUnlocked) {
+                            onUnlockUnit(unit.id);
+                        } else {
+                             // Nur auswählen, wenn Platzierung möglich ist
+                             if (canAffordPlacement && canPlaceMore) {
+                                if (isSelectedForPlacement) {
+                                    onSelectUnitForPlacement(null); // Deselektieren
+                                } else {
+                                    onSelectUnitForPlacement(unit); // Selektieren
+                                }
+                             } else {
+                                 // Optional: Hinweis geben, warum nicht ausgewählt werden kann
+                                 // z.B. alert("Nicht genug Credits oder Limit erreicht.");
+                             }
+                        }
+                    };
+
+                    let title = `${unit.name}\nUnlock: ${unit.unlockCost}C\nPlace: ${unit.placementCost}C`;
+                    if (!isUnlocked) {
+                         title += '\n(Click to Unlock)';
+                    } else if (!canAffordPlacement) {
+                        title += '\n(Not enough credits to place)';
+                    } else if (!canPlaceMore) {
+                         title += `\n(Placement limit ${PLACEMENT_LIMIT_PER_ROUND} reached)`;
+                    } else {
+                        title += '\n(Click to Place/Deselect)';
+                    }
+
+                    return (
+                        <button 
+                            key={unit.id} 
+                            className={`unit-tile ${isUnlocked ? 'unlocked' : 'locked'} ${isSelectedForPlacement ? 'selected-for-placement' : ''}`}
+                            onClick={handleClick}
+                            disabled={isDisabled}
+                            title={title}
+                        >
+                            {!isUnlocked && (
+                                <div className="unit-tile-lock" aria-hidden="true">🔒</div>
+                            )}
+                            <img 
+                                src={`/assets/units/${unit.id}.png`} 
+                                alt={unit.name} 
+                                onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }}
+                            />
+                            <span className="unit-tile-fallback hidden">{unit.icon || unit.id.substring(0,3)}</span>
+                            <div className="unit-tile-cost">
+                                {isUnlocked ? `${unit.placementCost} C` : `${unit.unlockCost} C`}
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+        </div>
+    );
+});
+
+const TopCenterPanel = React.memo<{ 
+    phase: GamePhase, 
+    round: number, 
+    timeRemaining: number | null, 
+    isHost: boolean, 
+    onForceStartCombat: () => void 
+}>(({ phase, round, timeRemaining, isHost, onForceStartCombat }) => {
+    if (phase !== 'Preparation') return null;
+    return (
+        <div className="game-info top-center-info">
+            <h4>Vorbereitung (Runde {round})</h4>
+            {timeRemaining !== null && (
+                <p>Verbleibende Zeit: <strong>{formatTime(timeRemaining)}</strong></p>
+            )}
+            {isHost && (
+                <button onClick={onForceStartCombat}>Kampf starten</button>
+            )}
+        </div>
+    );
+});
+
+const PhaseIndicator = React.memo<{ show: boolean, text: string | null }>(({ show, text }) => {
+    if (!show || !text) return null;
+    return (
+        <div className="phase-indicator">
+            {text}
+        </div>
+    );
+});
+
+// --- Konstante außerhalb der Komponente ---
+const PLACEMENT_LIMIT_PER_ROUND = 3; // Muss konsistent mit Server sein
+
+// --- Hauptkomponente GameLoader ---
 const GameLoader: React.FC = () => {
     const { gameState, selectedFigureId, setSelectedFigureId } = useGameStore();
     const { playerId } = usePlayerStore();
@@ -72,10 +282,10 @@ const GameLoader: React.FC = () => {
     const phaseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
     // Memoized Spielerdaten
-    const selfPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id === playerId), [gameState, playerId]);
-    const opponentPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id !== playerId), [gameState, playerId]);
-    const availableUnits = useMemo(() => placeholderUnits.filter(unit => unit.faction === selfPlayer?.faction), [selfPlayer]);
-    const isHost = useMemo(() => gameState && playerId !== null && gameState.hostId === playerId, [gameState, playerId]);
+    const selfPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id === playerId), [gameState?.players, playerId]);
+    const opponentPlayer = useMemo(() => gameState?.players.find((p: PlayerInGame) => p.id !== playerId), [gameState?.players, playerId]);
+    const availableUnits = useMemo(() => placeholderUnits.filter(unit => unit.faction === selfPlayer?.faction), [selfPlayer?.faction]);
+    const isHost = useMemo(() => gameState !== null && playerId !== null && gameState.hostId === playerId, [gameState?.hostId, playerId]);
 
     // Memoized Daten für die ausgewählte FIGUR (via Klick)
     const selectedFigureData = useMemo(() => {
@@ -83,7 +293,9 @@ const GameLoader: React.FC = () => {
         let foundFigure: FigureState | null = null;
         let ownerId: number | null = null;
 
-        for (const player of gameState.players) {
+        // Direkter Zugriff auf gameState.players Array
+        const players = gameState.players || [];
+        for (const player of players) {
             for (const unit of player.placedUnits) {
                 const figure = unit.figures.find(f => f.figureId === selectedFigureId);
                 if (figure) {
@@ -98,14 +310,14 @@ const GameLoader: React.FC = () => {
         if (!foundFigure) return null;
 
         const baseUnitData = placeholderUnits.find(u => u.id === foundFigure!.unitTypeId);
-        const ownerUsername = gameState.players.find(p => p.id === ownerId)?.username ?? '??';
+        const ownerUsername = players.find(p => p.id === ownerId)?.username ?? '??';
 
         return { 
             figure: foundFigure,
             baseData: baseUnitData,
             ownerUsername: ownerUsername
         };
-    }, [gameState, selectedFigureId]);
+    }, [gameState?.players, selectedFigureId]);
 
     // Countdown Timer Effekt
     useEffect(() => {
@@ -191,8 +403,8 @@ const GameLoader: React.FC = () => {
     }, [showPhaseIndicator]); // Abhängig vom Sichtbarkeits-Status
 
     // Handler
-    const handleUnlockUnit = (unitId: string) => {
-        if (!gameState) return;
+    const handleUnlockUnit = useCallback((unitId: string) => {
+        if (!gameState?.gameId) return;
         setIsUnlocking(unitId);
         socket.emit('game:unlock-unit', { gameId: gameState.gameId, unitId }, (response: any) => {
             if (!response?.success) {
@@ -200,24 +412,34 @@ const GameLoader: React.FC = () => {
             }
             setIsUnlocking(null);
         });
-    };
+    }, [gameState?.gameId]);
 
-    const handleSelectUnitForPlacement = (unit: Unit) => {
-        if (!gameState || !selfPlayer) return;
-        if (!selfPlayer.unlockedUnits.includes(unit.id)) return;
-        if (selfPlayer.credits < unit.placementCost) return;
-        setSelectedUnitForPlacement(unit);
-        setSelectedFigureId(null);
-    };
+    const handleSelectUnitForPlacementCallback = useCallback((unit: Unit | null) => {
+         // Prüfungen hierhin verschoben, um Callback stabil zu halten?
+         // Oder Props an UnitPool übergeben, damit es selbst prüft?
+         // Behalten wir die Logik erstmal im Handler, der an UnitPool übergeben wird.
+         
+         // Alte Logik von UnitPool hierher:
+         if (unit !== null) { // Wenn eine Einheit ausgewählt wird
+             if (!selfPlayer || !selfPlayer.unlockedUnits.includes(unit.id) || selfPlayer.credits < unit.placementCost || selfPlayer.unitsPlacedThisRound >= PLACEMENT_LIMIT_PER_ROUND) {
+                 // Auswahl nicht möglich, tue nichts oder gib Feedback
+                 return;
+             }
+         }
+         setSelectedUnitForPlacement(unit);
+         if (unit) {
+            setSelectedFigureId(null); // Auswahl der Figur aufheben, wenn Unit für Platzierung gewählt wird
+         }
+    }, [selfPlayer, setSelectedFigureId]);
 
-    const handleForceStartCombat = () => {
-        if (!gameState || !playerId || !isHost || gameState.phase !== 'Preparation') return;
+    const handleForceStartCombat = useCallback(() => {
+        if (!gameState?.gameId || !playerId || !isHost || gameState.phase !== 'Preparation') return;
         socket.emit('game:force-start-combat', gameState.gameId, (response: any) => {
             if (!response?.success) {
                 alert(`Fehler beim Starten des Kampfes: ${response?.message || 'Unbekannter Fehler'}`);
             }
         });
-    };
+    }, [gameState?.gameId, playerId, isHost, gameState?.phase]);
     // --- Ende der verschobenen Logik --- 
 
     // Asset Pfad Logik (bleibt wie zuvor)
@@ -242,7 +464,7 @@ const GameLoader: React.FC = () => {
         return uniquePaths;
     }, [gameState]); 
 
-    // NEU: Memoized Daten für die ausgewählte UNIT (basierend auf selectedFigureId)
+    // Memoized Daten für die ausgewählte UNIT (basierend auf selectedFigureId)
     const selectedPlacedUnitData = useMemo(() => {
         if (!gameState || !selectedFigureId) return null;
         let foundUnit: PlacedUnit | null = null;
@@ -276,7 +498,7 @@ const GameLoader: React.FC = () => {
         return <div>Berechne benötigte Spiel-Assets...</div>;
     }
 
-    // GameLoader rendert jetzt die Canvas UND die UI-Elemente
+    // GameLoader rendert jetzt die Canvas UND die memoized UI-Elemente
     return (
         <div className="game-screen-wrapper"> 
             <div ref={battlefieldContainerRef} className="battlefield-container"> 
@@ -294,138 +516,35 @@ const GameLoader: React.FC = () => {
                 </Canvas>
             </div>
 
-            <div className="game-info player-info">
-                <h3>{selfPlayer?.username || 'Spieler'} (Du)</h3>
-                <p>HP: {selfPlayer?.baseHealth ?? '??'}</p>
-            </div>
-            <div className="game-info opponent-info">
-                <h3>{opponentPlayer?.username || 'Gegner'}</h3>
-                <p>HP: {opponentPlayer?.baseHealth ?? '??'}</p>
-            </div>
-
-            {/* NEU: Top-Center Panel */}
-            {gameState.phase === 'Preparation' && (
-                <div className="game-info top-center-info"> {/* Neue Klasse und Position */} 
-                    <h4>Vorbereitung</h4>
-                    {timeRemaining !== null && (
-                        <p>Verbleibende Zeit: <strong>{formatTime(timeRemaining)}</strong></p>
-                    )}
-                    {isHost && (
-                        <button onClick={handleForceStartCombat}>Kampf starten</button>
-                    )}
-                </div>
-            )}
-
-            {/* NEU: Phasenindikator */} 
-             {showPhaseIndicator && (
-                <div className="phase-indicator">
-                    {displayedPhase}
-                </div>
-             )}
-
-            {/* Bottom-Left Panel (Angepasster Inhalt für Figur) */}
-            <div className="game-controls unit-details"> 
-                {selectedFigureData && selectedFigureData.baseData ? (
-                    <div>
-                        <h4>{selectedFigureData.baseData.name}</h4> 
-                        <div className="unit-details-content"> 
-                            <img 
-                                src={`/assets/units/${selectedFigureData.baseData.id}.png`} 
-                                alt={selectedFigureData.baseData.name}
-                                className="unit-details-icon" 
-                                onError={(e) => { e.currentTarget.src = '/assets/units/placeholder/figure_placeholder.png'; }} 
-                            />
-                            {/* NEU: Zweispaltiges Layout für Stats */}
-                            <div className="unit-details-stats" style={{ display: 'flex', gap: '20px' }}> 
-                                {/* Spalte 1: Basiswerte */}
-                                <div className="stats-column">
-                                    <p>HP: {selectedFigureData.figure.currentHP} / {selectedFigureData.baseData.hp}</p>
-                                    <p>Schaden (Basis): {selectedFigureData.baseData.damage}</p>
-                                    <p>Reichweite: {selectedFigureData.baseData.range}</p>
-                                    <p>Geschw.: {selectedFigureData.baseData.speed}</p>
-                                </div>
-                                {/* Spalte 2: Runden-Statistiken */}
-                                {selectedPlacedUnitData && (
-                                    <div className="stats-column">
-                                        {/* <hr style={{borderColor: 'var(--hud-blue-transparent)'}}/> // Trennlinie hier nicht mehr nötig? */}
-                                        <p>Schaden (LR): {selectedPlacedUnitData.unit.lastRoundDamageDealt}</p>
-                                        <p>Schaden (Ges): {selectedPlacedUnitData.unit.totalDamageDealt}</p>
-                                        <p>Kills (LR): {selectedPlacedUnitData.unit.lastRoundKills}</p>
-                                        <p>Kills (Ges): {selectedPlacedUnitData.unit.totalKills}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <div>
-                        <h4>Einheit Details</h4>
-                        <p>Keine Einheit ausgewählt. Klicke eine Figur im Feld an.</p>
-                    </div>
-                 )}
-            </div>
+            {/* Verwende memoized Komponenten */}
+            <PlayerInfoPanel player={selfPlayer} isSelf={true} />
+            <PlayerInfoPanel player={opponentPlayer} isSelf={false} />
             
-            {/* NEU: Credits Anzeige Panel */}
-            {selfPlayer && (
-                <div className="game-controls credits-display"> 
-                    <span>Credits: {selfPlayer.credits} C</span>
-                </div>
-            )}
+            <TopCenterPanel 
+                phase={gameState.phase}
+                round={gameState.round}
+                timeRemaining={timeRemaining}
+                isHost={isHost}
+                onForceStartCombat={handleForceStartCombat}
+            />
 
-            {/* Bottom-Right Panel (Unit Pool) */}
-            <div className="game-controls unit-pool">
-                 <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
-                 <div className="unit-tiles-grid"> 
-                {availableUnits.map((unit: Unit) => {
-                    const isUnlocked = selfPlayer?.unlockedUnits.includes(unit.id); 
-                    // console.log(`[GameLoader Render Tile] Einheit: ${unit.id}, isUnlocked: ${isUnlocked}`); // Auskommentiert
-                    const canAffordUnlock = selfPlayer ? selfPlayer.credits >= unit.unlockCost : false;
-                    const canAffordPlacement = selfPlayer ? selfPlayer.credits >= unit.placementCost : false;
-                    const unlockingThis = isUnlocking === unit.id;
-                    const isSelectedForPlacement = selectedUnitForPlacement?.id === unit.id;
+            <PhaseIndicator show={showPhaseIndicator} text={displayedPhase} />
 
-                    const isDisabled = unlockingThis ||
-                                    (!isUnlocked && !canAffordUnlock) ||
-                                    (isUnlocked && !canAffordPlacement) ||
-                                    (isUnlocked && !!selectedUnitForPlacement && !isSelectedForPlacement);
+            <UnitDetailsPanel 
+                selectedFigureData={selectedFigureData}
+                selectedPlacedUnitData={selectedPlacedUnitData}
+            />
+            
+            <CreditsDisplayPanel credits={selfPlayer?.credits} />
 
-                    const handleClick = () => {
-                        if (!isUnlocked) {
-                            handleUnlockUnit(unit.id);
-                        } else {
-                            if (isSelectedForPlacement) {
-                                setSelectedUnitForPlacement(null);
-                            } else {
-                                handleSelectUnitForPlacement(unit);
-                            }
-                        }
-                    };
-
-                    return (
-                    <button 
-                        key={unit.id} 
-                        className={`unit-tile ${isUnlocked ? 'unlocked' : 'locked'} ${isSelectedForPlacement ? 'selected-for-placement' : ''}`}
-                        onClick={handleClick}
-                        disabled={isDisabled}
-                        title={`${unit.name}\nUnlock: ${unit.unlockCost}C\nPlace: ${unit.placementCost}C${!isUnlocked ? '\n(Click to Unlock)' : '\n(Click to Place)'}`}
-                    >
-                        {!isUnlocked && (
-                            <div className="unit-tile-lock" aria-hidden="true">🔒</div>
-                        )}
-                        <img 
-                            src={`/assets/units/${unit.id}.png`} 
-                            alt={unit.name} 
-                            onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden'); }}
-                        />
-                        <span className="unit-tile-fallback hidden">{unit.icon || unit.id.substring(0,3)}</span>
-                        <div className="unit-tile-cost">
-                            {isUnlocked ? `${unit.placementCost} C` : `${unit.unlockCost} C`}
-                        </div>
-                    </button>
-                    );
-                })}
-                </div>
-            </div>
+            <UnitPoolPanel 
+                availableUnits={availableUnits}
+                selfPlayer={selfPlayer}
+                isUnlocking={isUnlocking}
+                selectedUnitForPlacement={selectedUnitForPlacement}
+                onUnlockUnit={handleUnlockUnit}
+                onSelectUnitForPlacement={handleSelectUnitForPlacementCallback}
+            />
         </div>
     );
 };

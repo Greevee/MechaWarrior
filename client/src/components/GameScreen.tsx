@@ -463,6 +463,106 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 });
 // +++ Ende Instanced Projectile Component +++
 
+// +++ NEU: Line Projectile Component +++
+interface LineProjectileEffectProps {
+    projectile: ProjectileState;
+}
+
+const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ projectile }) => {
+    // Refs für Start-/Endpunkt der Linie zur Interpolation
+    // Initialisiere mit der Startposition, um "Springen" zu vermeiden
+    const startPointRef = useRef(new THREE.Vector3(projectile.originPos.x, 0.5, projectile.originPos.z));
+    const endPointRef = useRef(new THREE.Vector3(projectile.originPos.x, 0.5, projectile.originPos.z));
+    const geometryRef = useRef<THREE.BufferGeometry>(null!); // Ref für die Geometrie selbst
+
+    const TRAIL_LENGTH = 0.6; // Länge des Linien-Tracers
+    const LINE_Y_OFFSET = 0.5; // Gleicher Y-Offset wie bei Sprites/Instanzen
+
+    // Richtung einmalig berechnen (oder wenn sich Ziel ändert? Vorerst konstant)
+    const direction = useMemo(() => {
+        return new THREE.Vector3(
+            projectile.targetPos.x - projectile.originPos.x,
+            0, // Ignoriere Y-Unterschied für Richtungsvektor am Boden
+            projectile.targetPos.z - projectile.originPos.z
+        ).normalize();
+    }, [projectile.originPos, projectile.targetPos]);
+
+    useFrame(() => {
+        // Zielposition aus Serverdaten holen
+        const targetEndPoint = new THREE.Vector3(projectile.currentPos.x, LINE_Y_OFFSET, projectile.currentPos.z);
+        
+        // Endpunkt interpolieren
+        endPointRef.current.lerp(targetEndPoint, 0.4); // Etwas schnelleres LERP für Linien?
+
+        // Startpunkt basierend auf interpoliertem Endpunkt und Richtung berechnen
+        startPointRef.current.copy(endPointRef.current).sub(direction.clone().multiplyScalar(TRAIL_LENGTH));
+
+        // Update der Geometrie der Linie
+        const geom = geometryRef.current;
+        if (geom) {
+            const positions = geom.attributes.position.array as Float32Array;
+            positions[0] = startPointRef.current.x;
+            positions[1] = startPointRef.current.y;
+            positions[2] = startPointRef.current.z;
+            positions[3] = endPointRef.current.x;
+            positions[4] = endPointRef.current.y;
+            positions[5] = endPointRef.current.z;
+            geom.attributes.position.needsUpdate = true; // Wichtig!
+            geom.computeBoundingSphere(); // Wichtig für Sichtbarkeit
+            
+            // DEBUG: Konsolenausgabe (nur bei Bedarf aktivieren)
+            // if (Math.random() < 0.01) { // Nur gelegentlich loggen
+            //     console.log(`Projectile ${projectile.projectileId}: Start [${positions[0].toFixed(1)}, ${positions[1].toFixed(1)}, ${positions[2].toFixed(1)}] End [${positions[3].toFixed(1)}, ${positions[4].toFixed(1)}, ${positions[5].toFixed(1)}]`);
+            // }
+        }
+    });
+
+    // Definiere die Geometrie initial mit Platzhalterpunkten
+    // Verwende useMemo, um die Geometrie nur einmal zu erstellen
+    const lineGeometry = useMemo(() => {
+        const points = [startPointRef.current.clone(), endPointRef.current.clone()];
+        const geom = new THREE.BufferGeometry().setFromPoints(points);
+        return geom;
+    }, []); // Leeres Abhängigkeitsarray, nur einmal erstellen
+
+    // Erstelle das Linienobjekt mit Material manuell für <primitive>
+    const lineObject = useMemo(() => {
+        const material = new THREE.LineBasicMaterial({
+            color: "yellow",
+            linewidth: 1,
+            transparent: true,
+            opacity: 1
+        });
+        const line = new THREE.Line(lineGeometry, material);
+        return line;
+    }, [lineGeometry]); // Nur neu erstellen, wenn sich die Geometrie ändert (sollte nicht)
+
+    // Weise die Ref der Geometrie zu, wenn das Objekt erstellt wird
+    useEffect(() => {
+        if (lineObject) {
+            geometryRef.current = lineObject.geometry as THREE.BufferGeometry;
+        }
+    }, [lineObject]);
+
+    return (
+        // Verwende primitive, um Typkonflikte zu vermeiden
+        <primitive object={lineObject} />
+        
+        /* // Alte Implementierung entfernt
+        <line geometry={lineGeometry} ref={geometryRef as any /* Type workaround für Ref * /}>
+             <lineBasicMaterial
+                color="yellow"
+                linewidth={1} // Test mit Breite 1
+                transparent={true} // Sicherstellen, dass Transparenz möglich ist
+                opacity={1} // Voll sichtbar
+                // toneMapped={false} // Optional: Verhindert, dass die Linie von Licht beeinflusst wird
+             />
+        </line>
+        */
+    );
+});
+// +++ Ende Line Projectile Component +++
+
 // NEU: Impact Effect Component
 interface ImpactEffectProps {
     id: string; // Eindeutige ID für diesen Effekt
@@ -666,16 +766,21 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
   const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); 
 
-  // NEU: Gruppiere Projektile nach unitTypeId
-  const groupedProjectiles = useMemo(() => {
+  // NEU: Gruppiere Projektile und trenne Infanterie-Projektile
+  const { groupedProjectiles, infantryProjectiles } = useMemo(() => {
     const groups: { [key: string]: ProjectileState[] } = {};
+    const infantry: ProjectileState[] = [];
     activeProjectiles.forEach(p => {
-        if (!groups[p.unitTypeId]) {
-            groups[p.unitTypeId] = [];
+        if (p.unitTypeId === 'human_infantry') {
+            infantry.push(p);
+        } else {
+            if (!groups[p.unitTypeId]) {
+                groups[p.unitTypeId] = [];
+            }
+            groups[p.unitTypeId].push(p);
         }
-        groups[p.unitTypeId].push(p);
     });
-    return groups;
+    return { groupedProjectiles: groups, infantryProjectiles: infantry };
   }, [activeProjectiles]);
 
   // Update der aktuell gerenderten Projektil-IDs bei jeder Änderung
@@ -823,7 +928,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
             />
         ))}
 
-        {/* NEU: Aktive Projektile (Instanced) */}
+        {/* Aktive Projektile (Instanced für die meisten Typen) */}
         {Object.entries(groupedProjectiles).map(([unitTypeId, projectilesOfType]) => {
             // Finde Unit-Daten für Fallback / Suspense (wie zuvor)
              const unitData = placeholderUnits.find(u => u.id === unitTypeId);
@@ -862,7 +967,17 @@ const GameScreen: React.FC<GameScreenProps> = ({
             );
         })}
         
-        {/* NEU: Aktive Impact-Effekte rendern (bleibt unverändert) */} 
+        {/* NEU: Aktive Projektile (Linien für Infanterie) */}
+        {infantryProjectiles.map(projectile => (
+            // Keine spezielle Suspense/Boundary nötig für einfache Linien?
+            // Aber Key ist wichtig für React
+            <LineProjectileEffect 
+                key={projectile.projectileId} 
+                projectile={projectile} 
+            />
+        ))}
+        
+        {/* Aktive Impact-Effekte rendern (bleibt unverändert) */} 
         {activeImpactEffects.map(effect => {
              // Finde Unit-Daten für den Fallback / Suspense
             const unitData = placeholderUnits.find(u => u.id === effect.unitTypeId);
