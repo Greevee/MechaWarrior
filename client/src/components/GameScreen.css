@@ -515,3 +515,22 @@ button {
 
 /* Container für die Einheiten-Auswahl (Unten rechts) - bleibt meist gleich */
 /* ... */ 
+
+/* NEU: Styling für Credits-Anzeige */
+.credits-display {
+  composes: hud-element; /* Erbt Basis-HUD-Stile */
+  right: 20px; /* Gleicher rechter Abstand wie Unit Pool */
+  /* Positioniere es über dem Unit Pool mit festem Abstand */
+  /* bottom: calc(25vh + 30px); */ /* ALT: war unzuverlässig */
+  bottom: 370px; /* NEU: Fester Abstand von unten (unit-pool ist bei bottom: 20px) -> ergibt ca. 10-20px Luft, je nach Padding/Border */
+  min-width: 150px;
+  width: auto; /* Breite passt sich Inhalt an */
+  padding: 8px 15px; /* Etwas weniger Padding als große Boxen */
+  text-align: center;
+  font-weight: bold;
+  font-size: 1.1em;
+  z-index: 11; /* Ggf. über Unit Pool, falls dieser überlappt */
+
+  /* Optional: Eigene Ecken/Verzierungen, wenn gewünscht */
+  /* .credits-display::before, .credits-display::after { display: none; } */
+} 

@@ -232,12 +232,10 @@ const GameLoader: React.FC = () => {
             <div className="game-info player-info">
                 <h3>{selfPlayer?.username || 'Spieler'} (Du)</h3>
                 <p>HP: {selfPlayer?.baseHealth ?? '??'}</p>
-                <p>Credits: {selfPlayer?.credits ?? '??'}</p>
             </div>
             <div className="game-info opponent-info">
                 <h3>{opponentPlayer?.username || 'Gegner'}</h3>
                 <p>HP: {opponentPlayer?.baseHealth ?? '??'}</p>
-                <p>Credits: {opponentPlayer?.credits ?? '??'}</p>
             </div>
 
             {/* NEU: Top-Center Panel */}
@@ -283,7 +281,14 @@ const GameLoader: React.FC = () => {
                  )}
             </div>
             
-            {/* Bottom-Right Panel (Unit Pool) - Unverändert in der Struktur */}
+            {/* NEU: Credits Anzeige Panel */}
+            {selfPlayer && (
+                <div className="game-controls credits-display"> 
+                    <span>Credits: {selfPlayer.credits} C</span>
+                </div>
+            )}
+
+            {/* Bottom-Right Panel (Unit Pool) */}
             <div className="game-controls unit-pool">
                  <h4>Einheiten (Fraktion: {selfPlayer?.faction})</h4>
                  <div className="unit-tiles-grid"> 
