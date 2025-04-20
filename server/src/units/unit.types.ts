@@ -50,6 +50,8 @@ export interface Unit {
   placementSpread?: number; // NEU: Zufällige Platzierungsabweichung (Radius)
   moveBobbingFrequency?: number; // Wie oft pro Sekunde
   moveBobbingAmplitude?: number; // Wie hoch der Sprung ist
+  idleBobbingFrequency?: number; // NEU: Frequenz für Idle-Animation (Auf/Ab)
+  idleBobbingAmplitude?: number; // NEU: Amplitude für Idle-Animation
 
   // NEU: Waffen der Einheit
   weapons: Weapon[]; // Jede Einheit hat eine Liste von Waffen
@@ -166,6 +168,8 @@ export const placeholderUnits: Unit[] = [
     placementSpread: 0.1,
     moveBobbingFrequency: 2,
     moveBobbingAmplitude: 0.05,
+    idleBobbingFrequency: 1,
+    idleBobbingAmplitude: 0.002,
     weapons: [infantryRifle],
     isAirUnit: false,
     mainWeaponIndex: 0
@@ -191,6 +195,8 @@ export const placeholderUnits: Unit[] = [
     placementSpread: 0.2,
     moveBobbingFrequency: 0.5,
     moveBobbingAmplitude: 0.02,
+    idleBobbingFrequency: 0.2,
+    idleBobbingAmplitude: 0.01,
     weapons: [smallTankCannon],
     isAirUnit: false,
     mainWeaponIndex: 0
@@ -214,6 +220,10 @@ export const placeholderUnits: Unit[] = [
     renderScale: 3,
     formation: '1x1',
     placementSpread: 0,
+    moveBobbingFrequency: 1,
+    moveBobbingAmplitude: 0.03,
+    idleBobbingFrequency: 0.5,
+    idleBobbingAmplitude: 0.01,
     weapons: [catapultStone],
     isAirUnit: false,
     mainWeaponIndex: 0
@@ -237,6 +247,10 @@ export const placeholderUnits: Unit[] = [
     renderScale: 4, // Großes Sprite
     formation: '1x1',
     placementSpread: 0,
+    moveBobbingFrequency: 0.8,
+    moveBobbingAmplitude: 0.04,
+    idleBobbingFrequency: 0.3,
+    idleBobbingAmplitude: 0.2,
     weapons: [molochCannon, infantryRifle, infantryRifle], // Hauptkanone, zwei Gewehre
     isAirUnit: true, // Lufteinheit!
     mainWeaponIndex: 0 // Kanone verursacht sichtbaren Recoil

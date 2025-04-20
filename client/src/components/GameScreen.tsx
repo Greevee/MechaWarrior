@@ -65,6 +65,9 @@ interface FigureSpriteProps {
     position: { x: number; z: number }; // Nur X/Z für Zielposition
     moveBobbingFrequency: number;
     moveBobbingAmplitude: number;
+    // NEU: Idle Animation Props
+    idleBobbingFrequency: number;
+    idleBobbingAmplitude: number;
     // NEU: Recoil-Parameter von der Hauptwaffe & Cooldowns
     mainWeaponId: string | null; // ID der Hauptwaffe (oder null wenn keine)
     weaponCooldowns: { [weaponId: string]: number }; // Aktuelle Cooldowns
@@ -85,6 +88,9 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
     position,
     moveBobbingFrequency,
     moveBobbingAmplitude,
+    // NEU: Idle Props empfangen
+    idleBobbingFrequency,
+    idleBobbingAmplitude,
     mainWeaponId,
     weaponCooldowns,
     recoilDurationMs,
@@ -152,11 +158,12 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
 
     useFrame((state, delta) => {
         let bobbingOffsetY = 0;
-        // Bobbing nur für Bodeneinheiten?
-        if (!isAirUnit && behavior === 'moving') { 
-            if (moveBobbingFrequency > 0 && moveBobbingAmplitude > 0) {
-                bobbingOffsetY = Math.sin(state.clock.elapsedTime * moveBobbingFrequency * 2 * Math.PI) * moveBobbingAmplitude;
-            }
+        // NEU: Unterscheide Bobbing nach Verhalten (Bedingung !isAirUnit entfernt)
+        if (behavior === 'moving' && moveBobbingFrequency > 0 && moveBobbingAmplitude > 0) {
+            bobbingOffsetY = Math.sin(state.clock.elapsedTime * moveBobbingFrequency * 2 * Math.PI) * moveBobbingAmplitude;
+        } else if (behavior === 'idle' && idleBobbingFrequency > 0 && idleBobbingAmplitude > 0) {
+            // Idle Bobbing verwenden
+            bobbingOffsetY = Math.sin(state.clock.elapsedTime * idleBobbingFrequency * 2 * Math.PI) * idleBobbingAmplitude;
         }
 
         // NEU: Finale Ziel-Y Position inkl. Flughöhe und Bobbing
@@ -243,6 +250,9 @@ interface FigureMeshProps {
     weaponCooldowns: { [weaponId: string]: number };
     gamePhase: GamePhase;
     isAirUnit: boolean; // NEU
+    // NEU: Idle Animation Props
+    idleBobbingFrequency: number;
+    idleBobbingAmplitude: number;
 }
 
 const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
@@ -254,6 +264,9 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
     weaponCooldowns,
     gamePhase,
     isAirUnit, // Empfangen
+    // NEU: Idle Props empfangen (werden unten übergeben)
+    idleBobbingFrequency,
+    idleBobbingAmplitude,
 }) => {
     const { setSelectedFigureId } = useGameStore();
 
@@ -263,6 +276,9 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
     const maxHP = unitData?.hp ?? 100;
     const moveBobbingFrequency = unitData?.moveBobbingFrequency ?? 0;
     const moveBobbingAmplitude = unitData?.moveBobbingAmplitude ?? 0;
+    // NEU: Hole Idle Bobbing Parameter (mit Standardwerten)
+    const idleBobFreq = unitData?.idleBobbingFrequency ?? 0; // Standard 0
+    const idleBobAmp = unitData?.idleBobbingAmplitude ?? 0; // Standard 0
     // NEU: Hole Hauptwaffe und deren Recoil-Parameter
     const mainWeaponIndex = unitData?.mainWeaponIndex ?? 0;
     const mainWeapon = (unitData?.weapons && unitData.weapons.length > mainWeaponIndex) 
@@ -307,6 +323,9 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
                 position={position}
                 moveBobbingFrequency={moveBobbingFrequency}
                 moveBobbingAmplitude={moveBobbingAmplitude}
+                // NEU: Übergebe Idle Bobbing Parameter
+                idleBobbingFrequency={idleBobFreq}
+                idleBobbingAmplitude={idleBobAmp}
                 mainWeaponId={mainWeaponId}
                 weaponCooldowns={weaponCooldowns}
                 recoilDurationMs={recoilDurationMs}
@@ -365,6 +384,9 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }>
                                 weaponCooldowns={weaponCooldowns}
                                 gamePhase={gamePhase}
                                 isAirUnit={isAirUnit} // NEU: Übergeben
+                                // NEU: Lese Idle Props aus UnitData und übergebe sie
+                                idleBobbingFrequency={unitData?.idleBobbingFrequency ?? 0}
+                                idleBobbingAmplitude={unitData?.idleBobbingAmplitude ?? 0}
                             />
                         </Suspense>
                     </ErrorBoundary>
