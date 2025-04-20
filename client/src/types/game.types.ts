@@ -7,6 +7,54 @@ import { GameMode } from "./lobby.types";
 // WORKAROUND: Definiere Faction hier direkt
 export type Faction = 'Human' | 'Machine' | 'Alien';
 
+// +++ NEU: Waffen-Typ vom Server übernehmen +++
+export interface Weapon {
+  id: string; 
+  damage: number;
+  attackSpeed: number; 
+  splashRadius: number;
+  range: number;
+  bulletSpeed?: number;
+  recoilDurationMs?: number;
+  recoilDistance?: number;
+  projectileRenderType: 'image' | 'computer';
+  projectileType: 'targeted' | 'ballistic';
+  impactEffectImage?: boolean;
+  projectileColor?: string;
+  projectileLineWidth?: number;
+  projectileTrailLength?: number;
+  projectileOffsetY?: number;
+  projectileForwardOffset?: number;
+  projectileImageScale?: number;
+}
+
+// +++ NEU: Unit-Typ vom Server übernehmen (ggf. anpassen) +++
+export interface Unit {
+  id: string;
+  name: string;
+  faction: Faction;
+  width: number;
+  height: number;
+  squadSize: number;
+  hp: number;
+  armor: number;
+  damageReduction: number;
+  shield: number;
+  placementCost: number;
+  unlockCost: number;
+  icon: string;
+  speed: number;
+  collisionRange?: number;
+  formation: string;
+  placementSpread?: number;
+  moveBobbingFrequency?: number;
+  moveBobbingAmplitude?: number;
+  weapons: Weapon[]; // Wichtig: Waffe-Typ verwenden
+  renderScale?: number;
+  isAirUnit?: boolean;
+  mainWeaponIndex?: number; // NEU
+}
+
 export type GamePhase = 'Preparation' | 'Combat' | 'RoundOver' | 'GameOver';
 export type FigureBehaviorState = 'idle' | 'moving' | 'attacking' | 'dead';
 
@@ -20,7 +68,9 @@ export interface FigureState {
     currentHP: number;
     behavior: FigureBehaviorState;
     targetFigureId?: string;
-    attackCooldownEnd: number;
+    // NEU: Cooldowns pro Waffe (vom Server synchronisiert)
+    // WICHTIG: Map wird oft als Objekt übertragen, Typ entsprechend anpassen!
+    weaponCooldowns: { [weaponId: string]: number }; // Objekt statt Map für JSON-Übertragung
 }
 
 // Zustand eines aktiven Projektils

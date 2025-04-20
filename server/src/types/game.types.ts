@@ -14,7 +14,8 @@ export interface FigureState {
     currentHP: number;
     behavior: FigureBehaviorState;
     targetFigureId: string | null; // ID der Zielfigur
-    attackCooldownEnd: number; // Zeitstempel (ms), wann nächster Angriff möglich ist
+    // NEU: Cooldowns pro Waffe speichern
+    weaponCooldowns: Map<string, number>; // Key: weapon.id, Value: Zeitstempel (ms)
 }
 
 // NEU: Zustand eines aktiven Projektils
@@ -75,4 +76,5 @@ export interface GameState {
     preparationEndTime?: number; 
     players: Map<number, PlayerInGame>; 
     activeProjectiles: ProjectileState[]; // NEU: Array für aktive Projektile 
+    combatStartTime?: number; // NEU: Zeitstempel (ms) für Start der Kampfphase
 } 

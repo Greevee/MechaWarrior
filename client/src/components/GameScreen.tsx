@@ -59,12 +59,14 @@ interface FigureSpriteProps {
     figureId: string;
     unitTypeId: string; // Für Texturpfad
     behavior: FigureBehaviorState;
-    attackCooldownEnd: number; // Für Rückstoß-Trigger
     position: { x: number; z: number }; // Nur X/Z für Zielposition
     moveBobbingFrequency: number;
     moveBobbingAmplitude: number;
-    recoilDurationMs: number;
-    recoilDistance: number;
+    // NEU: Recoil-Parameter von der Hauptwaffe & Cooldowns
+    mainWeaponId: string | null; // ID der Hauptwaffe (oder null wenn keine)
+    weaponCooldowns: { [weaponId: string]: number }; // Aktuelle Cooldowns
+    recoilDurationMs: number; // Von Hauptwaffe
+    recoilDistance: number;  // Von Hauptwaffe
     spriteWidth: number;
     spriteHeight: number;
     texturePath: string; // Direkter Pfad zur Textur
@@ -76,10 +78,11 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
     figureId,
     unitTypeId, // Wird noch für Debugging benötigt?
     behavior,
-    attackCooldownEnd,
     position,
     moveBobbingFrequency,
     moveBobbingAmplitude,
+    mainWeaponId,
+    weaponCooldowns,
     recoilDurationMs,
     recoilDistance,
     spriteWidth,
@@ -98,10 +101,10 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
     const lastPosition = useRef(new THREE.Vector3().copy(interpolatedPosition.current));
     const facingScaleX = useRef(1);
     const prevBehaviorRef = useRef<FigureBehaviorState>(behavior);
-    const prevAttackCooldownEndRef = useRef<number>(attackCooldownEnd);
-    const recoilStartTime = useRef<number | null>(null);
-    const recoilOffsetX = useRef(0);
+    const recoilOffsetX = useRef(0); // Ref für den Rückstoß-Offset
     const movementDirection = useMemo(() => new THREE.Vector3(), []);
+    const prevWeaponCooldownsRef = useRef<{ [weaponId: string]: number }>(weaponCooldowns);
+    const recoilStartTime = useRef<number | null>(null);
 
     // Lade die Textur mit dem übergebenen Pfad
     // Fehler/Suspense wird von der ErrorBoundary/Suspense in PlacedUnitMesh behandelt
@@ -115,14 +118,30 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
         }
     }, [spriteTexture]);
 
-    // Effekt zum Starten der Rückstoßanimation
+    // Effekt zum Starten der Rückstoßanimation - Reaktiviert & Modifiziert
     useEffect(() => {
-        if (attackCooldownEnd !== prevAttackCooldownEndRef.current && behavior === 'attacking') {
-            recoilStartTime.current = Date.now();
+        // +++ Debug Log +++
+        console.log(`FigureSprite ${figureId}: useEffect triggered. mainWpnId=${mainWeaponId}`, weaponCooldowns);
+        // Prüfe nur, wenn eine Hauptwaffe definiert ist
+        if (mainWeaponId) {
+            const currentCooldown = weaponCooldowns[mainWeaponId] ?? 0;
+            const prevCooldown = prevWeaponCooldownsRef.current[mainWeaponId] ?? 0;
+
+            // +++ Debug Log +++
+            console.log(`FigureSprite ${figureId}: Checking cooldowns. Current=${currentCooldown}, Prev=${prevCooldown}`);
+
+            // Wenn der Cooldown gestiegen ist, hat die Hauptwaffe gefeuert
+            if (currentCooldown > prevCooldown) {
+                // +++ Debug Log +++
+                console.log(`FigureSprite ${figureId}: Main weapon ${mainWeaponId} fired! Starting recoil at ${Date.now()}.`);
+                recoilStartTime.current = Date.now();
+            }
         }
-        prevAttackCooldownEndRef.current = attackCooldownEnd;
-        prevBehaviorRef.current = behavior; // Verhalten auch speichern, falls benötigt
-    }, [attackCooldownEnd, behavior]);
+
+        // Speichere aktuellen Cooldown-Status für nächsten Vergleich
+        prevWeaponCooldownsRef.current = weaponCooldowns;
+        prevBehaviorRef.current = behavior; 
+    }, [weaponCooldowns, mainWeaponId, behavior]);
 
     useFrame((state, delta) => {
         let bobbingOffsetY = 0;
@@ -154,18 +173,28 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
             }
         }
 
+        // Rückstoß-Berechnung - Reaktiviert
         if (recoilStartTime.current !== null) {
+
             const elapsedTime = Date.now() - recoilStartTime.current;
-            if (elapsedTime < recoilDurationMs) {
+            // +++ Debug Log +++
+            // console.log(`FigureSprite ${figureId}: Recoil active. elapsedTime=${elapsedTime}, duration=${recoilDurationMs}, distance=${recoilDistance}`);
+            // Verwende die übergebenen Parameter der Hauptwaffe
+            if (recoilDurationMs > 0 && elapsedTime < recoilDurationMs) { 
                 const progress = elapsedTime / recoilDurationMs;
                 const recoilAmount = Math.sin(progress * Math.PI) * recoilDistance;
                 recoilOffsetX.current = -facingScaleX.current * recoilAmount;
+                // +++ Debug Log +++
+                // console.log(`FigureSprite ${figureId}: Recoil progress=${progress.toFixed(2)}, offset=${recoilOffsetX.current.toFixed(2)}`);
             } else {
+                // +++ Debug Log +++
+                // console.log(`FigureSprite ${figureId}: Recoil ended.`);
                 recoilStartTime.current = null;
                 recoilOffsetX.current = 0;
             }
         } else {
-             recoilOffsetX.current = 0; // Sicherstellen, dass Offset 0 ist
+             // Sicherstellen, dass Offset 0 ist, wenn keine Animation läuft
+             recoilOffsetX.current = 0; 
         }
 
         if (meshRef.current) {
@@ -179,7 +208,7 @@ const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
                 <Plane
                     args={[spriteWidth, spriteHeight]}
                     scale={[facingScaleX.current, 1, 1]}
-                    position={[recoilOffsetX.current, 0, 0]}
+                    position={[recoilOffsetX.current, 0, 0]} // Greife auf .current zu
                 >
                     <meshBasicMaterial
                         color="white"
@@ -200,9 +229,9 @@ interface FigureMeshProps {
     figureId: string;
     unitTypeId: string;
     behavior: FigureBehaviorState;
-    attackCooldownEnd: number;
     position: { x: number; z: number };
     currentHP: number;
+    weaponCooldowns: { [weaponId: string]: number };
     gamePhase: GamePhase;
     // Keine figureData mehr!
 }
@@ -211,9 +240,9 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
     figureId,
     unitTypeId,
     behavior,
-    attackCooldownEnd,
     position,
     currentHP,
+    weaponCooldowns,
     gamePhase,
 }) => {
     const { setSelectedFigureId } = useGameStore();
@@ -224,10 +253,19 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
     const maxHP = unitData?.hp ?? 100;
     const moveBobbingFrequency = unitData?.moveBobbingFrequency ?? 0;
     const moveBobbingAmplitude = unitData?.moveBobbingAmplitude ?? 0;
-    const recoilDurationMs = unitData?.recoilDurationMs ?? 150;
-    const recoilDistance = unitData?.recoilDistance ?? 0.15;
+    // NEU: Hole Hauptwaffe und deren Recoil-Parameter
+    const mainWeaponIndex = unitData?.mainWeaponIndex ?? 0;
+    const mainWeapon = (unitData?.weapons && unitData.weapons.length > mainWeaponIndex) 
+                         ? unitData.weapons[mainWeaponIndex] 
+                         : null;
+    const mainWeaponId = mainWeapon?.id ?? null;
+    const recoilDurationMs = mainWeapon?.recoilDurationMs ?? 0;
+    const recoilDistance = mainWeapon?.recoilDistance ?? 0;
 
     // --- Berechne Sprite-Dimensionen und Pfad ---
+    // +++ Debug Log +++
+    // console.log(`FigureMesh ${figureId}: mainWpnId=${mainWeaponId}, recoilDur=${recoilDurationMs}, recoilDist=${recoilDistance}, cooldowns=`, weaponCooldowns);
+
     const getTexturePath = (typeId: string, currentBehavior: FigureBehaviorState): string => {
         return `/assets/units/${typeId}/${currentBehavior}.png`;
     };
@@ -256,10 +294,11 @@ const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
                 figureId={figureId}
                 unitTypeId={unitTypeId}
                 behavior={behavior}
-                attackCooldownEnd={attackCooldownEnd}
                 position={position}
                 moveBobbingFrequency={moveBobbingFrequency}
                 moveBobbingAmplitude={moveBobbingAmplitude}
+                mainWeaponId={mainWeaponId}
+                weaponCooldowns={weaponCooldowns}
                 recoilDurationMs={recoilDurationMs}
                 recoilDistance={recoilDistance}
                 spriteWidth={spriteWidth}
@@ -284,7 +323,7 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }>
         <group userData={{ unitInstanceId: placedUnit.instanceId }}>
             {placedUnit.figures.map((figure: FigureState) => {
                 // +++ NEU: Extrahiere Props für FigureMesh +++
-                const { figureId, unitTypeId, behavior, attackCooldownEnd, position, currentHP } = figure;
+                const { figureId, unitTypeId, behavior, position, currentHP } = figure;
 
                 // Definiere den Fallback für diese Figur
                 const fallbackMesh = (color: string, wireframe = false) => (
@@ -305,9 +344,9 @@ const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }>
                                 figureId={figureId}
                                 unitTypeId={unitTypeId}
                                 behavior={behavior}
-                                attackCooldownEnd={attackCooldownEnd}
                                 position={position} // Position-Objekt ist ok, da es sich oft komplett ändert
                                 currentHP={currentHP}
+                                weaponCooldowns={figure.weaponCooldowns}
                                 gamePhase={gamePhase}
                             />
                         </Suspense>
@@ -371,7 +410,7 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 
     // +++ NEU: Hole unitData, um Skalierungsfaktor zu bekommen +++
     const unitData = useMemo(() => placeholderUnits.find(u => u.id === unitTypeId), [unitTypeId]);
-    const scaleModifier = unitData?.projectileImageScale ?? 1; // Default 1
+    const scaleModifier = unitData?.weapons[0]?.projectileImageScale ?? 1; 
 
     // --- Sprite Loading (nur einmal pro Typ) ---
     const getProjectileTexturePath = (typeId: string): string => {
@@ -830,7 +869,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         const unitData = placeholderUnits.find(u => u.id === p.unitTypeId);
         if (!unitData) return; // Einheit nicht gefunden, überspringen
 
-        if (unitData.projectileRenderType === 'computer') {
+        if (unitData.weapons && unitData.weapons.length > 0 && unitData.weapons[0]?.projectileRenderType === 'computer') {
             // Füge Projektil und seine Konfiguration zur Liste hinzu
             compWithConfig.push({ projectile: p, config: unitData });
         } else { // Annahme: 'image'
@@ -862,8 +901,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
                     // Finde die Unit-Daten des Projektils
                     const unitData = placeholderUnits.find(u => u.id === prevProjectile.unitTypeId);
 
-                    // Prüfe, ob die Einheit einen Impact-Effekt hat
-                    if (unitData?.impactEffectImage) {
+                    // Prüfe, ob die Einheit (bzw. ihre erste Waffe) einen Impact-Effekt hat
+                    if (unitData?.weapons && unitData.weapons.length > 0 && unitData.weapons[0]?.impactEffectImage) {
                         // console.log(`Impact detected for projectile ${prevProjectile.projectileId} from unit ${unitData.id}`);
                         
                         // Erstelle einen neuen Impact-Effekt an der letzten Position
@@ -990,18 +1029,22 @@ const GameScreen: React.FC<GameScreenProps> = ({
         ))}
 
         {/* 1. Computer-gerenderte Projektile (Linien) */}
-        {computerProjectilesWithConfig.map(({ projectile, config }) => (
-             <LineProjectileEffect
-                 key={projectile.projectileId}
-                 projectile={projectile}
-                 // Übergebe Konfigurationswerte aus unitData (mit Defaults)
-                 color={config.projectileColor ?? '#FFFF00'} 
-                 linewidth={config.projectileLineWidth ?? 1}
-                 trailLength={config.projectileTrailLength ?? 0.6}
-                 offsetY={config.projectileOffsetY ?? 0.5}
-                 forwardOffset={config.projectileForwardOffset ?? 0.2}
-             />
-        ))}
+        {computerProjectilesWithConfig.map(({ projectile, config }) => {
+            // Hole die erste Waffe aus der Konfiguration (config ist unitData)
+            const weaponConfig = config?.weapons[0]; 
+            return (
+                <LineProjectileEffect
+                    key={projectile.projectileId}
+                    projectile={projectile}
+                    // Übergebe Konfigurationswerte aus der ersten Waffe (weaponConfig) (mit Defaults)
+                    color={weaponConfig?.projectileColor ?? '#FFFF00'} 
+                    linewidth={weaponConfig?.projectileLineWidth ?? 1}
+                    trailLength={weaponConfig?.projectileTrailLength ?? 0.6}
+                    offsetY={weaponConfig?.projectileOffsetY ?? 0.5}
+                    forwardOffset={weaponConfig?.projectileForwardOffset ?? 0.2}
+                />
+            );
+        })}
         
         {/* 2. Bild-basierte Projektile (Instanced Sprites) */}
         {Object.entries(imageProjectilesGrouped).map(([unitTypeId, projectilesOfType]) => {

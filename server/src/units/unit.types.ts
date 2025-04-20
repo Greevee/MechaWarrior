@@ -1,5 +1,31 @@
 import { Faction } from '../types/common.types';
 
+// +++ NEU: Waffendefinition +++
+export interface Weapon {
+  id: string; // Eindeutige ID für die Waffe, z.B. 'infantry_rifle'
+  damage: number;
+  attackSpeed: number; // Angriffe pro Sekunde
+  splashRadius: number;
+  range: number;
+  bulletSpeed?: number;
+  recoilDurationMs?: number; // Optional, nicht jede Waffe hat Rückstoß
+  recoilDistance?: number;  // Optional
+  projectileRenderType: 'image' | 'computer';
+  projectileType: 'targeted' | 'ballistic';
+  impactEffectImage?: boolean; // Zeigt an, ob beim Einschlag ein Effekt gezeigt wird
+
+  // Optional: Nur relevant wenn projectileRenderType === 'computer'
+  projectileColor?: string;
+  projectileLineWidth?: number;
+  projectileTrailLength?: number;
+  projectileOffsetY?: number;
+  projectileForwardOffset?: number;
+
+  // Optional: Nur relevant wenn projectileRenderType === 'image'
+  projectileImageScale?: number;
+}
+// +++ Ende Waffendefinition +++
+
 export interface Unit {
   id: string;
   name: string;
@@ -7,10 +33,6 @@ export interface Unit {
   width: number;    // Anzahl Felder horizontal
   height: number;   // Anzahl Felder vertikal
   squadSize: number; // z.B. 10 für Infanteriegruppe
-  damage: number;
-  attackSpeed: number; // Angriffe pro Sekunde
-  splashRadius: number; // 0 = kein Splash
-  range: number; // Reichweite in Feldern
   hp: number;
   armor: number; // % Schaden reduziert
   damageReduction: number; // Flat Schaden reduziert
@@ -19,34 +41,77 @@ export interface Unit {
   unlockCost: number;    // Kosten zum einmaligen Freischalten pro Match
   icon: string;          // Pfad oder Name für das Einheiten-Icon (Platzhalter)
   speed: number;         // Bewegungsgeschwindigkeit (Felder pro Sekunde?)
-  bulletSpeed?: number; // NEU: Geschwindigkeit der Geschosse (optional)
-  impactEffectImage?: boolean; // NEU: Zeigt an, ob ein Standard-Aufprall-Effekt verwendet wird (assets/units/<id>/impact/impact.png)
   collisionRange?: number; // NEU: Radius für Kollisionserkennung (optional)
   formation: string;    // e.g., "5x2", "3x3", "1x1"
   placementSpread?: number; // NEU: Zufällige Platzierungsabweichung (Radius)
-  recoilDurationMs?: number;
-  recoilDistance?: number;
-  // NEU: Hüpf-Animation beim Bewegen
   moveBobbingFrequency?: number; // Wie oft pro Sekunde
   moveBobbingAmplitude?: number; // Wie hoch der Sprung ist
 
-  // NEU: Projektil Rendering Konfiguration
-  projectileRenderType: 'image' | 'computer'; // Wie wird das Projektil gerendert?
-  projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
-
-  // Optional: Nur relevant wenn projectileRenderType === 'computer'
-  projectileColor?: string;
-  projectileLineWidth?: number;
-  projectileTrailLength?: number; // Länge des Linien-Tracers
-  projectileOffsetY?: number;     // Y-Offset der Linie über dem Boden
-  projectileForwardOffset?: number; // Offset der Linie vor dem Ziel
-
-  // Optional: Nur relevant wenn projectileRenderType === 'image'
-  projectileImageScale?: number; // Skalierung des Projektil-Sprites
+  // NEU: Waffen der Einheit
+  weapons: Weapon[]; // Jede Einheit hat eine Liste von Waffen
 
   // NEU: Visuelle Skalierung der Einheit selbst
   renderScale?: number; // Multiplikator für die Standard-Sprite-Größe (1 = 100%)
+
+  // NEU: Typ der Einheit
+  isAirUnit?: boolean; // Ist es eine Lufteinheit? (Standard: false)
+
+  // NEU: Index der Hauptwaffe (für Effekte wie Recoil)
+  mainWeaponIndex?: number; // Standardmäßig 0, falls nicht angegeben
 }
+
+// +++ NEU: Platzhalter-Waffen Definitionen +++
+export const infantryRifle: Weapon = {
+    id: 'infantry_rifle',
+    damage: 12,
+    attackSpeed: 1,
+    splashRadius: 0,
+    range: 10,
+    bulletSpeed: 30,
+    recoilDurationMs: 150,
+    recoilDistance: 0.1,
+    projectileRenderType: 'computer',
+    projectileType: 'targeted',
+    impactEffectImage: false, // Gewehrkugeln normalerweise kein großer Impact
+    projectileColor: '#ebd686',
+    projectileLineWidth: 1,
+    projectileTrailLength: 0.3,
+    projectileOffsetY: 0.5,
+    projectileForwardOffset: 0.5
+};
+
+export const smallTankCannon: Weapon = {
+    id: 'small_tank_cannon',
+    damage: 600,
+    attackSpeed: 0.3,
+    splashRadius: 0.2,
+    range: 12,
+    bulletSpeed: 15,
+    recoilDurationMs: 250,
+    recoilDistance: 0.25,
+    projectileRenderType: 'image',
+    projectileType: 'targeted',
+    impactEffectImage: true,
+    projectileImageScale: 0.5
+};
+
+export const catapultStone: Weapon = {
+    id: 'catapult_stone',
+    damage: 5000,
+    attackSpeed: 0.2,
+    splashRadius: 1.0,
+    range: 12,
+    bulletSpeed: 10,
+    // Kein Recoil für Katapult
+    projectileRenderType: 'image',
+    projectileType: 'ballistic',
+    impactEffectImage: true,
+    projectileImageScale: 1
+};
+
+// Optional: Eine Sammlung aller Waffen für einfachen Zugriff?
+export const placeholderWeapons: Weapon[] = [infantryRifle, smallTankCannon, catapultStone];
+// +++ Ende Platzhalter-Waffen +++
 
 export const placeholderUnits: Unit[] = [
   {
@@ -56,10 +121,6 @@ export const placeholderUnits: Unit[] = [
     width: 5,
     height: 2,
     squadSize: 15,
-    damage: 12,
-    attackSpeed: 1,
-    splashRadius: 0,
-    range: 10,
     hp: 50,
     armor: 0.1,
     damageReduction: 1,
@@ -68,22 +129,15 @@ export const placeholderUnits: Unit[] = [
     unlockCost: 0,
     icon: 'human_infantry_icon',
     speed: 1,
-    bulletSpeed: 30,
     collisionRange: 0.2,
     renderScale: 0.5,
     formation: '5x3',
     placementSpread: 0.1,
-    recoilDurationMs: 150,
-    recoilDistance: 0.1,
     moveBobbingFrequency: 2,
     moveBobbingAmplitude: 0.05,
-    projectileRenderType: 'computer',
-    projectileType: 'targeted',
-    projectileColor: '#ebd686',
-    projectileLineWidth: 1,
-    projectileTrailLength: 0.3,
-    projectileOffsetY: 0.5,
-    projectileForwardOffset: 0.5
+    weapons: [infantryRifle],
+    isAirUnit: false,
+    mainWeaponIndex: 0
   },
   {
     id: 'human_small_tank',
@@ -92,10 +146,6 @@ export const placeholderUnits: Unit[] = [
     width: 5,
     height: 2,
     squadSize: 5,
-    damage: 600,
-    attackSpeed: 0.3,
-    splashRadius: 0.2,
-    range: 12,
     hp: 3000,
     armor: 0.2,
     damageReduction: 3,
@@ -104,19 +154,15 @@ export const placeholderUnits: Unit[] = [
     unlockCost: 0,
     icon: 'human_small_tank_icon',
     speed: 1.5,
-    bulletSpeed: 15,
-    impactEffectImage: true,
     collisionRange: 0.5,
     renderScale: 1.2,
     formation: '5x1',
     placementSpread: 0.2,
-    recoilDurationMs: 250,
-    recoilDistance: 0.25,
     moveBobbingFrequency: 0.5,
     moveBobbingAmplitude: 0.02,
-    projectileRenderType: 'image',
-    projectileType: 'targeted',
-    projectileImageScale: 0.5
+    weapons: [smallTankCannon],
+    isAirUnit: false,
+    mainWeaponIndex: 0
   },
   {
     id: 'human_catapult',
@@ -125,11 +171,6 @@ export const placeholderUnits: Unit[] = [
     width: 3,
     height: 3,
     squadSize: 1,
-    damage: 5000,
-    attackSpeed: 0.2,
-    splashRadius: 1.0,
-    range: 12,
-    bulletSpeed: 10,
     hp: 12000,
     armor: 0.1,
     damageReduction: 0,
@@ -138,16 +179,13 @@ export const placeholderUnits: Unit[] = [
     unlockCost: 100,
     icon: 'human_catapult_icon',
     speed: 0.6,
-    impactEffectImage: true,
     collisionRange: 0.6,
     renderScale: 3,
     formation: '1x1',
     placementSpread: 0,
-    projectileRenderType: 'image',
-    projectileType: 'ballistic',
-    projectileImageScale: 1,
-    moveBobbingFrequency: 1,
-    moveBobbingAmplitude: 0.05
+    weapons: [catapultStone],
+    isAirUnit: false,
+    mainWeaponIndex: 0
   }
 ];
 
