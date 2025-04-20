@@ -20,6 +20,7 @@ export interface Unit {
   icon: string;          // Pfad oder Name für das Einheiten-Icon (Platzhalter)
   speed: number;         // Bewegungsgeschwindigkeit (Felder pro Sekunde?)
   bulletSpeed?: number; // NEU: Geschwindigkeit der Geschosse (optional)
+  impactEffectImage?: boolean; // NEU: Zeigt an, ob ein Standard-Aufprall-Effekt verwendet wird (assets/units/<id>/impact/impact.png)
   collisionRange?: number; // NEU: Radius für Kollisionserkennung (optional)
   modelScale?: number; // NEU: Skalierungsfaktor für das 3D-Modell (optional)
   formation: string;    // e.g., "5x2", "3x3", "1x1"
@@ -75,7 +76,8 @@ export const placeholderUnits: Unit[] = [
     collisionRange: 0.5,
     modelScale: 1.2,
     formation: '5x1',
-    placementSpread: 0.2
+    placementSpread: 0.2,
+    impactEffectImage: true
   }
 ];
 

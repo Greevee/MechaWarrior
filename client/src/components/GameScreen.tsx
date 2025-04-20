@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef, Suspense } from 'react';
+import React, { useEffect, useState, useMemo, useRef, Suspense, useCallback } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats } from '@react-three/drei';
 import * as THREE from 'three';
@@ -7,6 +7,7 @@ import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
 import PlacementSystem from './PlacementSystem.tsx';
 import ErrorBoundary from './ErrorBoundary';
+import { v4 as uuidv4 } from 'uuid';
 
 // --- Health Bar Component ---
 const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> = React.memo(({ currentHP, maxHP, scale }) => {
@@ -346,6 +347,82 @@ const ProjectileMesh: React.FC<{ projectile: ProjectileState }> = React.memo(({ 
     );
 });
 
+// NEU: Impact Effect Component
+interface ImpactEffectProps {
+    id: string; // Eindeutige ID für diesen Effekt
+    position: THREE.Vector3;
+    unitTypeId: string;
+    onComplete: (id: string) => void; // Callback zum Entfernen
+    duration?: number; // Dauer des Effekts in Sekunden
+}
+
+const ImpactEffect: React.FC<ImpactEffectProps> = ({ 
+    id, 
+    position, 
+    unitTypeId, 
+    onComplete, 
+    duration = 1.0 // Dauer jetzt 1 Sekunde
+}) => {
+    const meshRef = useRef<THREE.Mesh>(null!);
+    const materialRef = useRef<THREE.MeshBasicMaterial>(null!);
+    const startTime = useRef(Date.now());
+    const texturePath = `/assets/units/${unitTypeId}/impact/impact.png`;
+
+    // Lade die Impact-Textur
+    // Fehler werden durch Suspense/ErrorBoundary außen behandelt
+    const impactTexture = useTexture(texturePath);
+
+    // Ladefehler abfangen und Standardwerte verwenden
+    const aspectWidth = impactTexture?.image?.width ?? 1;
+    const aspectHeight = impactTexture?.image?.height ?? 1;
+    const spriteAspect = aspectWidth / aspectHeight;
+    
+    const spriteHeight = 0.5; // Größe des Impacts (anpassen nach Bedarf)
+    const spriteWidth = spriteHeight * spriteAspect;
+
+    useEffect(() => {
+        if (impactTexture) {
+            impactTexture.colorSpace = THREE.SRGBColorSpace;
+            impactTexture.needsUpdate = true;
+        }
+    }, [impactTexture]);
+
+    useFrame(() => {
+        const elapsedTime = (Date.now() - startTime.current) / 1000; // Zeit in Sekunden
+        const progress = Math.min(1, elapsedTime / duration); // Progress wieder berechnen
+
+        // Fading-Logik wieder aktiviert
+        if (materialRef.current) {
+            materialRef.current.opacity = 1 - progress; // Fade out
+            materialRef.current.needsUpdate = true;
+        }
+
+        // Nach Ablauf der Dauer entfernen
+        if (progress >= 1) { 
+            onComplete(id); // Effekt beendet, entfernen
+        }
+    });
+
+    // Wir verwenden jetzt Billboard, damit die Grafik immer zur Kamera zeigt.
+    return (
+        <Billboard position={position}> {/* Billboard umschließt jetzt die Plane */} 
+             <mesh ref={meshRef}> {/* Mesh ist jetzt innerhalb von Billboard, nur für Refs? Oder direkt Plane? */} 
+                <Plane args={[spriteWidth, spriteHeight]}>
+                    <meshBasicMaterial
+                        ref={materialRef}
+                        map={impactTexture}
+                        transparent={true}
+                        opacity={1} // Startet voll sichtbar
+                        side={THREE.DoubleSide}
+                        alphaTest={0.1} 
+                        depthWrite={false} 
+                    />
+                </Plane>
+            </mesh>
+        </Billboard>
+    );
+};
+
 // NEU: Definiere Props für GameScreen
 interface GameScreenProps {
     gameState: ClientGameState;
@@ -356,25 +433,93 @@ interface GameScreenProps {
     setSelectedUnitForPlacement: React.Dispatch<React.SetStateAction<Unit | null>>;
 }
 
+// Interface für einen aktiven Impact-Effekt im State
+interface ActiveImpactEffect {
+    id: string;
+    position: THREE.Vector3;
+    unitTypeId: string;
+}
+
 const GameScreen: React.FC<GameScreenProps> = ({ 
     gameState, 
     playerId, 
     battlefieldContainerRef,
-    selectedUnitForPlacement, // Prop empfangen
-    setSelectedUnitForPlacement, // Prop empfangen
+    selectedUnitForPlacement,
+    setSelectedUnitForPlacement,
 }) => {
-  const { camera } = useThree(); // Kamera-Objekt wieder hinzufügen
+  const { camera } = useThree(); 
+  
+  // Zustand für die aktuell sichtbaren Impact-Effekte
+  const [activeImpactEffects, setActiveImpactEffects] = useState<ActiveImpactEffect[]>([]);
+  
+  // Ref, um den vorherigen GameState für den Vergleich zu speichern
+  const prevGameStateRef = useRef<ClientGameState | null>(null);
+  // Ref, um die IDs der aktuell gerenderten Projektile zu speichern
+  const currentProjectileIdsRef = useRef<Set<string>>(new Set());
 
-  // Zustand und Logik für UI-Elemente wurden nach GameLoader verschoben
-  // Wir benötigen hier nur noch die Logik, die *direkt* die 3D-Szene beeinflusst.
-
-  // selectedUnitForPlacement wird weiterhin benötigt für PlacementSystem
-  // Lokaler State entfernt, wird jetzt als Prop empfangen.
 
   // Berechnungen, die *nur* für die 3D-Szene relevant sind:
   const allPlacedUnits = useMemo(() => gameState?.players.flatMap(p => p.placedUnits) ?? [], [gameState?.players]);
   const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
-  const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); // Wird für PlacementSystem benötigt
+  const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); 
+
+  // Update der aktuell gerenderten Projektil-IDs bei jeder Änderung
+   useEffect(() => {
+        currentProjectileIdsRef.current = new Set(activeProjectiles.map(p => p.projectileId));
+    }, [activeProjectiles]);
+
+  // Effekt zum Erkennen von entfernten Projektilen und Hinzufügen von Impacts
+   useEffect(() => {
+        if (prevGameStateRef.current && gameState) {
+            const prevProjectiles = prevGameStateRef.current.activeProjectiles ?? [];
+            const currentProjectileIds = currentProjectileIdsRef.current; // Verwende die Ref
+
+            prevProjectiles.forEach(prevProjectile => {
+                // Wenn ein Projektil im vorherigen Frame da war, aber jetzt nicht mehr...
+                if (!currentProjectileIds.has(prevProjectile.projectileId)) {
+                    
+                    // Finde die Unit-Daten des Projektils
+                    const unitData = placeholderUnits.find(u => u.id === prevProjectile.unitTypeId);
+
+                    // Prüfe, ob die Einheit einen Impact-Effekt hat
+                    if (unitData?.impactEffectImage) {
+                        // console.log(`Impact detected for projectile ${prevProjectile.projectileId} from unit ${unitData.id}`);
+                        
+                        // Erstelle einen neuen Impact-Effekt an der letzten Position
+                        const impactPosition = new THREE.Vector3(
+                            prevProjectile.currentPos.x, 
+                            0.5, // Höhe des Impacts (anpassen?)
+                            prevProjectile.currentPos.z
+                        );
+                        
+                        const newEffect: ActiveImpactEffect = {
+                            id: uuidv4(), // Eindeutige ID generieren
+                            position: impactPosition,
+                            unitTypeId: unitData.id,
+                        };
+
+                        // Füge den neuen Effekt zum State hinzu
+                        setActiveImpactEffects(prevEffects => [...prevEffects, newEffect]);
+                    }
+                }
+            });
+        }
+
+        // Speichere den aktuellen gameState für den nächsten Vergleich
+        // WICHTIG: Erstelle eine tiefe Kopie, um Referenzprobleme zu vermeiden,
+        // oder stelle sicher, dass gameState unveränderlich ist.
+        // Wenn gameState direkt mutiert wird, funktioniert dieser Vergleich nicht.
+        // Annahme: gameState wird bei jedem Update neu erstellt (z.B. durch State-Management).
+        prevGameStateRef.current = gameState; 
+
+    }, [gameState]); // Abhängigkeit nur von gameState
+
+    // Callback-Funktion zum Entfernen eines Effekts aus dem State
+    const handleImpactComplete = useCallback((idToRemove: string) => {
+        // console.log(`Removing impact effect ${idToRemove}`);
+        setActiveImpactEffects(prevEffects => prevEffects.filter(effect => effect.id !== idToRemove));
+    }, []); // Keine Abhängigkeiten, Funktion bleibt stabil
+
 
   // Define axis length for helper
   const axisLength = 10;
@@ -391,7 +536,6 @@ const GameScreen: React.FC<GameScreenProps> = ({
   }, [camera]);
 
   if (!gameState) {
-    // Sollte nicht passieren, da GameLoader wartet
     return <div>Lade Spielzustand...</div>;
   }
 
@@ -401,13 +545,11 @@ const GameScreen: React.FC<GameScreenProps> = ({
         <Stats /> 
 
         {/* GameScreen rendert jetzt nur noch den Inhalt der Canvas */}
-        {/* Die äußeren Container und die Canvas selbst sind in GameLoader */} 
-
         <CanvasUpdater containerRef={battlefieldContainerRef} /> 
         <ambientLight intensity={0.6} />
         <directionalLight position={[10, 20, 5]} intensity={0.8} />
 
-        {/* NEU: Achsen-Helfer (direkt nutzbar) */}
+        {/* NEU: Achsen-Helfer */}
         <axesHelper args={[axisLength]} />
         
         {/* Axis Labels */}
@@ -421,26 +563,24 @@ const GameScreen: React.FC<GameScreenProps> = ({
            <span style={{ color: 'blue', fontWeight: 'bold', fontSize: '1.5em' }}>Z</span>
         </Html>
 
-        {/* Boden-Plane mit neuer Textur */}
+        {/* Boden-Plane */}
         <GroundPlane />
        
         <OrbitControls 
-          enableRotate={true} // Rotation generell erlauben
+          enableRotate={true} 
           enablePan={true}     
           mouseButtons={{
-            LEFT: THREE.MOUSE.ROTATE, // Linke Taste für Rotation
+            LEFT: THREE.MOUSE.ROTATE, 
             MIDDLE: THREE.MOUSE.DOLLY, 
-            RIGHT: THREE.MOUSE.PAN    // Rechte Taste für Panning (Bewegung)
+            RIGHT: THREE.MOUSE.PAN 
           }}
           screenSpacePanning={false}
-          target={[0, 0, 25]} // Explizit das Ziel für OrbitControls setzen
-            // Vertikale Rotation: Keine Einschränkung
-            // Horizontale Rotation: ±45° von der Startrichtung (-90°)
-            minAzimuthAngle={-3 * Math.PI / 4} // -135°
-            maxAzimuthAngle={-Math.PI / 4}   // -45°
+          target={[0, 0, 25]} 
+            minAzimuthAngle={-3 * Math.PI / 4} 
+            maxAzimuthAngle={-Math.PI / 4}   
         /> 
 
-        {/* NEU: Platziersystem rendern */}
+        {/* Platziersystem rendern */}
         <PlacementSystem 
             gameState={gameState}
             playerId={playerId}
@@ -448,7 +588,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
             selectedUnitForPlacement={selectedUnitForPlacement}
             setSelectedUnitForPlacement={setSelectedUnitForPlacement}
         />
-       
+   
         {/* Platziere Einheiten */}
         {allPlacedUnits.map(unit => (
             <PlacedUnitMesh 
@@ -460,30 +600,69 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
         {/* Aktive Projektile */}
         {activeProjectiles.map(projectile => {
+            // Finde Unit-Daten, um zu prüfen, ob ein Projektil überhaupt gerendert werden soll
+             const unitData = placeholderUnits.find(u => u.id === projectile.unitTypeId);
+             // Wenn keine Unit-Daten gefunden oder keine Projektil-Grafik erwartet wird, überspringen?
+             // Oder Fallback verwenden? Hier wird aktuell immer versucht zu rendern.
+             // TODO: Ggf. Logik hinzufügen, um Projektile ohne Grafik nicht zu rendern.
+
             return (
-                // Umschließe mit ErrorBoundary und Suspense
                 <ErrorBoundary
                     key={`${projectile.projectileId}-boundary`}
-                    fallback={
-                        // Fallback für Ladefehler (z.B. rote Kugel)
+                    fallback={/* ... (Fallback bleibt gleich) ... */
                         <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
                             <sphereGeometry args={[0.1, 8, 8]} />
                             <meshStandardMaterial color="red" />
                         </mesh>
                     }
                 >
-                    <Suspense fallback={
-                        // Fallback während des Ladens (z.B. gelbe Kugel)
+                    <Suspense fallback={/* ... (Fallback bleibt gleich) ... */
                          <mesh position={[projectile.currentPos.x, 0.5, projectile.currentPos.z]}>
                             <sphereGeometry args={[0.1, 8, 8]} />
                             <meshStandardMaterial color="yellow" wireframe />
                         </mesh>
                     }>
                         <ProjectileMesh 
-                            key={projectile.projectileId} 
+                            key={projectile.projectileId} // Key bleibt hier wichtig für React
                             projectile={projectile}
                         />
                     </Suspense>
+                </ErrorBoundary>
+            );
+        })}
+        
+        {/* NEU: Aktive Impact-Effekte rendern */}
+        {activeImpactEffects.map(effect => {
+             // Finde Unit-Daten für den Fallback / Suspense
+            const unitData = placeholderUnits.find(u => u.id === effect.unitTypeId);
+            const impactTexturePath = unitData ? `/assets/units/${unitData.id}/impact/impact.png` : ''; // Pfad für useTexture
+
+             return (
+                <ErrorBoundary
+                    key={`${effect.id}-boundary`} // Eindeutiger Key für Boundary
+                    fallback={
+                        // Fallback, wenn Textur im ImpactEffect nicht geladen werden kann
+                        <mesh position={effect.position}>
+                            <boxGeometry args={[0.2, 0.2, 0.2]} />
+                            <meshStandardMaterial color="magenta" />
+                        </mesh>
+                    }
+                >
+                     <Suspense fallback={
+                        // Fallback, während die Impact-Textur lädt
+                         <mesh position={effect.position}>
+                            <boxGeometry args={[0.2, 0.2, 0.2]} />
+                            <meshStandardMaterial color="cyan" wireframe />
+                        </mesh>
+                     }>
+                        <ImpactEffect
+                            key={effect.id} // Eindeutiger Key für den Effekt selbst
+                            id={effect.id}
+                            position={effect.position}
+                            unitTypeId={effect.unitTypeId}
+                            onComplete={handleImpactComplete}
+                        />
+                     </Suspense>
                 </ErrorBoundary>
             );
         })}
