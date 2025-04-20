@@ -397,6 +397,40 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
         }
     }, [spriteTexture]);
 
+    // +++ NEU: useEffect zum Setzen der initialen/aktuellen Matrizen +++
+    useEffect(() => {
+        if (!meshRef.current || projectiles.length === 0) return;
+
+        // Holen der Kamera-Position für Billboard-Effekt (optional hier, aber konsistent)
+        // Man könnte auch eine feste Ausrichtung initial setzen, wenn die Kamera noch nicht bereit ist
+        // const cameraPosition = useThree().camera.position; // useThree() kann hier nicht direkt verwendet werden!
+        // Wir verwenden stattdessen die aktuelle Position vom Server für die initiale Platzierung.
+
+        projectiles.forEach((projectile, i) => {
+            if (i >= meshRef.current!.count) return; // Sicherheitscheck
+
+            // Direkte Positionierung basierend auf projectile.currentPos
+            const currentX = projectile.currentPos.x;
+            // Verwende yOffset für die Höhe
+            const currentY = yOffset;
+            const currentZ = projectile.currentPos.z;
+
+            dummyObject.position.set(currentX, currentY, currentZ);
+
+            // Billboard-Effekt optional schon hier anwenden?
+            // Fürs Erste lassen wir es, useFrame kümmert sich darum.
+            // dummyObject.lookAt(cameraPosition);
+
+            // Matrix aktualisieren und direkt setzen
+            dummyObject.updateMatrix();
+            meshRef.current!.setMatrixAt(i, dummyObject.matrix);
+        });
+
+        // Wichtig: Flag setzen, damit Three.js die Änderungen übernimmt
+        meshRef.current.instanceMatrix.needsUpdate = true;
+
+    }, [projectiles, spriteWidth, spriteHeight, yOffset]); // Abhängigkeiten: Projektile und Geometrie/Offset
+
     // --- Instanz-Updates (jetzt in useFrame) ---
     useFrame((state, delta) => {
         if (!meshRef.current || projectiles.length === 0) return;
