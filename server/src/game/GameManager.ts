@@ -28,6 +28,9 @@ const PREPARATION_TIME_SECONDS = 10; // z.B. 30 Sekunden Vorbereitungszeit
 const ROUND_INTERVAL_SECONDS = 5; // Zeit zwischen den Runden
 const MAX_PROJECTILE_ARC_HEIGHT = 5; // Maximale Höhe des Bogens für ballistische Projektile
 
+// +++ NEU: Konstante für Flughöhe (vom Client übernommen) +++
+const FLIGHT_HEIGHT = 2.0;
+
 // Hilfsfunktion: Lineare Interpolation
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
@@ -440,7 +443,9 @@ export class GameManager {
 
                 p.currentPos.x = lerp(p.originPos.x, p.targetPos.x, progress);
                 p.currentPos.z = lerp(p.originPos.z, p.targetPos.z, progress);
-                p.currentPos.y = calculateParabolicHeight(progress, MAX_PROJECTILE_ARC_HEIGHT);
+                // NEU: Addiere Parabelhöhe zur Ursprungshöhe
+                const originY = p.originPos.y ?? 0; // Fallback, sollte aber existieren
+                p.currentPos.y = originY + calculateParabolicHeight(progress, MAX_PROJECTILE_ARC_HEIGHT);
                 projectilesChanged = true;
 
                 if (progress >= 1.0) {
@@ -526,7 +531,10 @@ export class GameManager {
                     const progress = travelDist / totalDistToTarget;
                     p.currentPos.x = lerp(p.originPos.x, p.targetPos.x, progress);
                     p.currentPos.z = lerp(p.originPos.z, p.targetPos.z, progress);
-                    p.currentPos.y = 0; // Targeted fliegen auf Y=0
+                    // NEU: Interpoliere Y zwischen Ursprung und Ziel
+                    const originY = p.originPos.y ?? 0; // Fallback
+                    const targetY = p.targetPos.y ?? 0; // Fallback
+                    p.currentPos.y = lerp(originY, targetY, progress); 
                     remainingProjectiles.push(p);
                 }
             }
@@ -710,6 +718,12 @@ export class GameManager {
                                  }
                                  totalFlightTime = Math.max(0.1, totalFlightTime);
 
+                                 // NEU: Bestimme Ursprungs- und Zielhöhe basierend auf Einheitentyp
+                                 const shooterUnitData = placeholderUnits.find(u => u.id === figure.unitTypeId);
+                                 const targetUnitData = placeholderUnits.find(u => u.id === targetForThisWeapon.unitTypeId);
+                                 const originY = shooterUnitData?.isAirUnit ? FLIGHT_HEIGHT : 0; // Höhe des Schützen
+                                 const targetY = targetUnitData?.isAirUnit ? FLIGHT_HEIGHT : 0; // Höhe des Ziels
+
                                  const newProjectile: ProjectileState = {
                                      projectileId: uuidv4(),
                                      playerId: figure.playerId,
@@ -722,9 +736,9 @@ export class GameManager {
                                      speed: bulletSpeed, 
                                      splashRadius: weapon.splashRadius, 
                                      // *******************************
-                                     originPos: { ...figure.position },
-                                     targetPos: { ...targetForThisWeapon.position }, 
-                                     currentPos: { x: figure.position.x, y: 0, z: figure.position.z },
+                                     originPos: { x: figure.position.x, y: originY, z: figure.position.z }, // Inkl. Y
+                                     targetPos: { x: targetForThisWeapon.position.x, y: targetY, z: targetForThisWeapon.position.z }, // Inkl. Y 
+                                     currentPos: { x: figure.position.x, y: originY, z: figure.position.z }, // Startet auf Ursprungs-Y
                                      targetFigureId: targetForThisWeapon.figureId, 
                                      createdAt: now,
                                      totalFlightTime: totalFlightTime, 

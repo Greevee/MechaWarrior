@@ -86,8 +86,8 @@ export interface ProjectileState {
     projectileType: 'targeted' | 'ballistic'; // NEU: Art des Projektils
     speed: number;          
     splashRadius: number;   // NEU: Radius für Flächenschaden
-    originPos: { x: number; z: number }; 
-    targetPos: { x: number; z: number }; 
+    originPos: { x: number; y: number; z: number }; // Y-Koordinate hinzugefügt
+    targetPos: { x: number; z: number }; // Target bleibt vorerst ohne Y?
     currentPos: { x: number; y: number; z: number }; // NEU: Inklusive Y-Koordinate
     targetFigureId: string; 
     createdAt: number;      

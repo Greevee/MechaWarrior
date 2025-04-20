@@ -472,7 +472,8 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 
             // Initialposition direkt vom Server setzen
             const currentX = projectile.currentPos.x;
-            const currentY = projectile.currentPos.y; // Y vom Server für Initialisierung
+            // Verwende originPos.y für die initiale Höhe!
+            const currentY = projectile.originPos.y ?? projectile.currentPos.y; 
             const currentZ = projectile.currentPos.z;
 
             dummyObject.position.set(currentX, currentY, currentZ);
@@ -509,13 +510,14 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 
                 finalX = lerp(projectile.originPos.x, projectile.targetPos.x, progress);
                 finalZ = lerp(projectile.originPos.z, projectile.targetPos.z, progress);
-                // Verwende die client-seitige Höhenberechnung
-                finalY = calculateParabolicHeight(progress, MAX_PROJECTILE_ARC_HEIGHT);
+                // Verwende die client-seitige Höhenberechnung und ADDIERE sie zur Starthöhe
+                const originY = projectile.originPos.y ?? 0; // Fallback für den Fall, dass Y fehlt
+                finalY = originY + calculateParabolicHeight(progress, MAX_PROJECTILE_ARC_HEIGHT);
                 
             } else { // 'targeted' oder unbekannt (Fallback: Interpolation zur Server-Position)
                 // Ziel ist die aktuelle Position vom Server
                 const targetX = projectile.currentPos.x;
-                // Für gezielte Projektile nehmen wir Y vom Server (sollte meist 0 sein oder feste Höhe)
+                // Für gezielte Projektile nehmen wir Y vom Server (sollte jetzt korrekt sein)
                 const targetY = projectile.currentPos.y;
                 const targetZ = projectile.currentPos.z;
 
@@ -613,7 +615,7 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({
     const direction = useMemo(() => {
         return new THREE.Vector3(
             projectile.targetPos.x - projectile.originPos.x,
-            0, // Ignoriere Y-Unterschied für Richtungsvektor am Boden
+            0, // Vorerst Y ignorieren für Richtungsvektor am Boden
             projectile.targetPos.z - projectile.originPos.z
         ).normalize();
     }, [projectile.originPos, projectile.targetPos]);
@@ -625,19 +627,23 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({
     const lerpTarget = useMemo(() => new THREE.Vector3(), []);
     const tempVec = useMemo(() => new THREE.Vector3(), []); // Für Zwischenberechnungen
 
+    // --- NEU: Verwende originPos.y für die Starthöhe --- 
+    const originY = projectile.originPos.y ?? 0; // Fallback
+
     const endPointRef = useRef(new THREE.Vector3(
         projectile.originPos.x + initialOffsetVec.x,
-        offsetY, // NEU: Prop
+        originY + offsetY, // Kombiniere Starthöhe und relativen Offset
         projectile.originPos.z + initialOffsetVec.z
     ));
     // Initialer Startpunkt basiert auf initialem Endpunkt und Trail-Länge
-    const startPointRef = useRef(endPointRef.current.clone().sub(tempVec.copy(direction).multiplyScalar(trailLength))); // NEU: Prop
+    const startPointRef = useRef(endPointRef.current.clone().sub(tempVec.copy(direction).multiplyScalar(trailLength))); 
 
     useFrame(() => {
-        // Zielposition aus Serverdaten holen
-        const targetEndPoint = tempVec.set(projectile.currentPos.x, offsetY, projectile.currentPos.z); // NEU: Prop offsetY
+        // Zielposition aus Serverdaten holen (currentPos sollte jetzt korrekte Y haben)
+        const targetEndPoint = tempVec.set(projectile.currentPos.x, projectile.currentPos.y, projectile.currentPos.z); 
 
         // Zielposition für den Endpunkt mit Offset berechnen
+        // Beachte: Offset wird hier nur in X/Z-Richtung addiert
         offsetVector.copy(direction).multiplyScalar(forwardOffset); // NEU: Prop forwardOffset
         lerpTarget.copy(targetEndPoint).add(offsetVector);
 
