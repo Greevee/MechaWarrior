@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, Suspense, useCallback } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats } from '@react-three/drei';
+import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats, Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState, GamePhase } from '../types/game.types';
 import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
@@ -440,6 +440,41 @@ interface ActiveImpactEffect {
     unitTypeId: string;
 }
 
+// NEU: Komponente für die umgebende Landschaft
+const SurroundingLandscape = () => {
+  // Annahme: Du hast eine passende Textur unter public/assets/sand.png
+  const sandTexture = useTexture('/assets/sand.png');
+  const landscapeSize = 500; // Größe der umgebenden Landschaft (viel größer als das Schlachtfeld)
+  const textureRepeat = 50; // Wie oft die Textur wiederholt wird
+
+  // Textur konfigurieren (ähnlich wie bei GroundPlane)
+  useEffect(() => {
+    if (sandTexture) {
+        sandTexture.wrapS = sandTexture.wrapT = THREE.RepeatWrapping;
+        sandTexture.repeat.set(textureRepeat, textureRepeat); 
+        // sandTexture.rotation = 0; // Keine Rotation nötig?
+        sandTexture.anisotropy = 16; 
+        sandTexture.colorSpace = THREE.SRGBColorSpace;
+        sandTexture.needsUpdate = true;
+    }
+  }, [sandTexture]);
+
+  return (
+    <Plane 
+        args={[landscapeSize, landscapeSize]} 
+        rotation={[-Math.PI / 2, 0, 0]} 
+        // Leicht unter der Haupt-GroundPlane positionieren, um Z-Fighting zu vermeiden
+        position={[0, -0.05, 25]} 
+    >
+        <meshStandardMaterial 
+            map={sandTexture} // Wüsten-Textur anwenden
+            color="white" 
+            side={THREE.DoubleSide} 
+        />
+    </Plane>
+  );
+}
+
 const GameScreen: React.FC<GameScreenProps> = ({ 
     gameState, 
     playerId, 
@@ -544,6 +579,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
         {/* FPS Anzeige */} 
         <Stats /> 
 
+        {/* NEU: Skybox hinzufügen */} 
+        <Sky distance={450000} sunPosition={[0, 1, 0]} inclination={0} azimuth={0.25} />
+
         {/* GameScreen rendert jetzt nur noch den Inhalt der Canvas */}
         <CanvasUpdater containerRef={battlefieldContainerRef} /> 
         <ambientLight intensity={0.6} />
@@ -566,6 +604,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
         {/* Boden-Plane */}
         <GroundPlane />
        
+        {/* NEU: Umgebende Landschaft hinzufügen */}
+        <SurroundingLandscape />
+       
         <OrbitControls 
           enableRotate={true} 
           enablePan={true}     
@@ -578,6 +619,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
           target={[0, 0, 25]} 
             minAzimuthAngle={-3 * Math.PI / 4} 
             maxAzimuthAngle={-Math.PI / 4}   
+            maxPolarAngle={Math.PI / 2} 
         /> 
 
         {/* Platziersystem rendern */}
