@@ -1,14 +1,29 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Plane, Line, useTexture, Billboard } from '@react-three/drei';
 import * as THREE from 'three';
 import { GameState as ClientGameState, PlayerInGame, FigureState } from '../types/game.types'; // Pfad ggf. anpassen
 import { Unit, placeholderUnits } from '../../../server/src/units/unit.types'; // Pfad ggf. anpassen
 import { socket } from '../socket'; // Pfad ggf. anpassen
 
-// --- Placement Preview Mesh Component --- (Aus GameScreen.tsx kopiert & angepasst)
-const PlacementPreviewMesh: React.FC<{ unit: Unit, position: { x: number, z: number } }> = ({ unit, position }) => {
-    const yOffset = 0.05;
+// Konstanten für die Grid-Dimensionen (ggf. auslagern oder aus gameState beziehen)
+const GRID_WIDTH = 50;
+const PLAYER_ZONE_DEPTH = 20;
+const NEUTRAL_ZONE_DEPTH = 10;
+const TOTAL_DEPTH = PLAYER_ZONE_DEPTH * 2 + NEUTRAL_ZONE_DEPTH;
+const GRID_MIN_X = -GRID_WIDTH / 2;
+const GRID_MAX_X = GRID_WIDTH / 2;
+const GRID_MIN_Z = 0;
+const GRID_MAX_Z = TOTAL_DEPTH;
 
+// --- Placement Preview Mesh Component --- (Angepasst für Farbwechsel)
+const PlacementPreviewMesh: React.FC<{ 
+    unit: Unit, 
+    position: { x: number, z: number }, 
+    isValid: boolean 
+}> = ({ unit, position, isValid }) => {
+    const yOffset = 0.05; // Leicht über dem Boden und den gelben Highlights
+
+    // Berechnung der endgültigen Platzierungsposition (zentriert auf Grid-Zellen)
     const halfW = unit.width / 2;
     const halfH = unit.height / 2;
     const minXCell = Math.floor(position.x - halfW + 0.5);
@@ -20,7 +35,7 @@ const PlacementPreviewMesh: React.FC<{ unit: Unit, position: { x: number, z: num
     const planeWidth = unit.width;
     const planeHeight = unit.height;
 
-    // console.log(`[PlacementPreviewMesh] Unit ${unit.id} (${unit.width}x${unit.height}) at grid (${position.x}, ${position.z}) -> Cells X:[${minXCell}-${maxXCell}], Z:[${minZCell}-${maxZCell}] -> Centering Plane at (${(finalCenterX + 0.5).toFixed(2)}, ${(finalCenterZ + 0.5).toFixed(2)})`);
+    const color = isValid ? 'green' : 'red';
 
     return (
         <mesh
@@ -29,15 +44,56 @@ const PlacementPreviewMesh: React.FC<{ unit: Unit, position: { x: number, z: num
         >
             <planeGeometry args={[planeWidth, planeHeight]} />
             <meshBasicMaterial
-                color="yellow"
+                color={color} // Farbe basierend auf Gültigkeit
                 transparent
                 opacity={0.5}
                 side={THREE.DoubleSide}
+                depthWrite={false} // Verhindert Probleme mit Transparenz-Sortierung
             />
         </mesh>
     );
 };
 
+// Hilfsfunktion zur Validierung der Platzierung
+const isValidPlacement = (
+    unit: Unit,
+    targetCenterPos: { x: number, z: number },
+    occupiedCells: Set<string>, // Set von "x,z" Strings
+    playerMinZ: number,
+    playerMaxZ: number
+): boolean => {
+    if (!unit) return false;
+
+    const halfW = unit.width / 2;
+    const halfH = unit.height / 2;
+    const minXCell = Math.floor(targetCenterPos.x - halfW + 0.5);
+    const maxXCell = Math.floor(targetCenterPos.x + halfW - 0.5);
+    const minZCell = Math.floor(targetCenterPos.z - halfH + 0.5);
+    const maxZCell = Math.floor(targetCenterPos.z + halfH - 0.5);
+
+    for (let x = minXCell; x <= maxXCell; x++) {
+        for (let z = minZCell; z <= maxZCell; z++) {
+            // 1. Prüfung: Innerhalb der globalen Grid-Grenzen?
+            if (x < GRID_MIN_X || x >= GRID_MAX_X || z < GRID_MIN_Z || z >= GRID_MAX_Z) {
+                // console.log(`Validation failed: Out of global bounds at ${x},${z}`);
+                return false;
+            }
+            // 2. Prüfung: Innerhalb der Spieler-Platzierungszone?
+            if (z < playerMinZ || z >= playerMaxZ) { // Z-Grenzen sind exklusiv oben
+                // console.log(`Validation failed: Out of player Z bounds (${playerMinZ}-${playerMaxZ}) at ${x},${z}`);
+                return false;
+            }
+            // 3. Prüfung: Kollision mit anderer Einheit?
+            if (occupiedCells.has(`${x},${z}`)) {
+                // console.log(`Validation failed: Collision at ${x},${z}`);
+                return false;
+            }
+        }
+    }
+    
+    // console.log(`Validation success at ${targetCenterPos.x},${targetCenterPos.z}`);
+    return true; // Alle Zellen sind gültig
+};
 
 // --- Placement Zone Highlight Component --- (Aus GameScreen.tsx kopiert)
 const PlacementZoneHighlight: React.FC<{ gameState: ClientGameState, playerId: number | null }> = ({ gameState, playerId }) => {
@@ -131,7 +187,6 @@ const PlacementGridCursor: React.FC<{ unit: Unit, previewPosition: { x: number, 
     return <>{lines}</>;
 };
 
-
 // --- Placement System Wrapper Component --- 
 interface PlacementSystemProps {
     gameState: ClientGameState | null;
@@ -149,84 +204,109 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
     setSelectedUnitForPlacement,
 }) => {
     const [placementPreviewPosition, setPlacementPreviewPosition] = useState<{ x: number, z: number } | null>(null);
+    const [isCurrentPlacementValid, setIsCurrentPlacementValid] = useState<boolean>(false);
 
-    // Berechne Grenzen der Spielerzone für die Interaktionsebene
-    const { playerZoneWidth, playerZoneDepth, playerZoneCenterX, playerZoneCenterZ, playerMinZ, playerMaxZ } = useMemo(() => {
-        const GRID_WIDTH = 50;
-        const PLAYER_ZONE_DEPTH = 20;
-        const NEUTRAL_ZONE_DEPTH = 10;
-        const TOTAL_DEPTH = PLAYER_ZONE_DEPTH * 2 + NEUTRAL_ZONE_DEPTH;
-        const gridMinX = -GRID_WIDTH / 2;
-        const gridMaxX = GRID_WIDTH / 2;
-        const gridMinZ = 0;
-        const gridMaxZ = TOTAL_DEPTH;
+    // Berechne Grenzen der Spielerzone
+    const { playerMinZ, playerMaxZ } = useMemo(() => {
         let pMinZ: number | null = null;
         let pMaxZ: number | null = null;
-
         if (playerId !== null && gameState) {
             const isHostPlacing = playerId === gameState.hostId;
             if (isHostPlacing) {
-                pMinZ = gridMinZ;
+                pMinZ = GRID_MIN_Z;
                 pMaxZ = PLAYER_ZONE_DEPTH;
             } else {
                 pMinZ = PLAYER_ZONE_DEPTH + NEUTRAL_ZONE_DEPTH;
-                pMaxZ = gridMaxZ;
+                pMaxZ = GRID_MAX_Z;
             }
         }
-        const pZoneWidth = gridMaxX - gridMinX;
-        const pZoneDepth = (pMinZ !== null && pMaxZ !== null) ? pMaxZ - pMinZ : 0;
-        const pZoneCenterX = (gridMinX + gridMaxX) / 2; // Should be 0
-        const pZoneCenterZ = (pMinZ !== null && pMaxZ !== null) ? (pMinZ + pMaxZ) / 2 : 0;
-
-        return { playerZoneWidth: pZoneWidth, playerZoneDepth: pZoneDepth, playerZoneCenterX: pZoneCenterX, playerZoneCenterZ: pZoneCenterZ, playerMinZ: pMinZ, playerMaxZ: pMaxZ };
+        return { playerMinZ: pMinZ, playerMaxZ: pMaxZ };
     }, [gameState, playerId]);
+
+    // Berechne besetzte Zellen des aktuellen Spielers
+    const occupiedCells = useMemo(() => {
+        const cells = new Set<string>();
+        if (!selfPlayer || !selfPlayer.placedUnits) return cells;
+
+        selfPlayer.placedUnits.forEach(unit => {
+            unit.figures.forEach(figure => {
+                const cellX = Math.floor(figure.position.x);
+                const cellZ = Math.floor(figure.position.z);
+                cells.add(`${cellX},${cellZ}`);
+            });
+        });
+        return cells;
+    }, [selfPlayer]);
+
+    // Effekt zur Validierung, wenn sich Vorschauposition oder Auswahl ändert
+    useEffect(() => {
+        if (selectedUnitForPlacement && placementPreviewPosition && playerMinZ !== null && playerMaxZ !== null) {
+            const isValid = isValidPlacement(
+                selectedUnitForPlacement,
+                placementPreviewPosition,
+                occupiedCells,
+                playerMinZ,
+                playerMaxZ
+            );
+            setIsCurrentPlacementValid(isValid);
+        } else {
+            setIsCurrentPlacementValid(false); // Ungültig, wenn nichts ausgewählt/positioniert ist
+        }
+    }, [selectedUnitForPlacement, placementPreviewPosition, occupiedCells, playerMinZ, playerMaxZ]);
 
     // Event Handlers
     const handlePlacementPointerMove = (event: any) => {
         if (!selectedUnitForPlacement) return;
         const point = event.point;
-         // Check if the point is within the allowed Z range for this player
         if (point && playerMinZ !== null && playerMaxZ !== null && point.z >= playerMinZ && point.z <= playerMaxZ) {
-            const previewX = Math.round(point.x);
-            const previewZ = Math.round(point.z);
-            if (!placementPreviewPosition || placementPreviewPosition.x !== previewX || placementPreviewPosition.z !== previewZ) {
-                setPlacementPreviewPosition({ x: previewX, z: previewZ });
-            }
+            // Runde auf die nächste Zelle für die Vorschau
+            const previewX = Math.floor(point.x);
+            const previewZ = Math.floor(point.z);
+            // Setze Position nur, wenn sie sich geändert hat
+             if (!placementPreviewPosition || placementPreviewPosition.x !== previewX || placementPreviewPosition.z !== previewZ) {
+                 setPlacementPreviewPosition({ x: previewX, z: previewZ });
+             }
         } else {
-            if (placementPreviewPosition !== null) {
-                setPlacementPreviewPosition(null); // Reset if outside zone or invalid
-            }
+             if (placementPreviewPosition !== null) {
+                 setPlacementPreviewPosition(null);
+             }
         }
     };
 
     const handlePlacementPointerOut = (event: any) => {
-        if (placementPreviewPosition !== null) {
-            setPlacementPreviewPosition(null);
-        }
+        setPlacementPreviewPosition(null);
     };
 
     const handlePlacementClick = (event: any) => {
-        if (!selectedUnitForPlacement || !gameState || !selfPlayer || !placementPreviewPosition) {
-            return;
+        if (!selectedUnitForPlacement || !gameState || !selfPlayer || !placementPreviewPosition || !isCurrentPlacementValid) {
+             console.warn("[PlacementSystem:Click] Click ignored, placement invalid or missing data.");
+            return; // Klick ignorieren, wenn Platzierung nicht gültig ist
         }
-        // Check again if the final preview position is valid (redundant if PointerMove checks correctly)
-        if (playerMinZ === null || playerMaxZ === null || placementPreviewPosition.z < playerMinZ || placementPreviewPosition.z > playerMaxZ) {
-             console.warn("[PlacementSystem:Click] Click ignored, position outside placement zone.");
-             return;
-        }
-
+        
         event.stopPropagation();
+
+        // Berechne die finale Mittelpunkt-Position basierend auf den Zellen
+        const halfW = selectedUnitForPlacement.width / 2;
+        const halfH = selectedUnitForPlacement.height / 2;
+        const minXCell = Math.floor(placementPreviewPosition.x - halfW + 0.5);
+        const maxXCell = Math.floor(placementPreviewPosition.x + halfW - 0.5);
+        const minZCell = Math.floor(placementPreviewPosition.z - halfH + 0.5);
+        const maxZCell = Math.floor(placementPreviewPosition.z + halfH - 0.5);
+        const finalCenterX = (minXCell + maxXCell) / 2 + 0.5;
+        const finalCenterZ = (minZCell + maxZCell) / 2 + 0.5;
 
         const placementData = {
             gameId: gameState.gameId,
             unitId: selectedUnitForPlacement.id,
-            position: { x: placementPreviewPosition.x, z: placementPreviewPosition.z },
+             // Sende die berechnete Mittelpunkt-Position an den Server
+            position: { x: finalCenterX, z: finalCenterZ },
         };
         console.log("[PlacementSystem:Click] Emitting 'game:place-unit'", placementData);
         socket.emit('game:place-unit', placementData, (response: any) => {
             if (!response?.success) {
                 alert(`Placement Error: ${response?.message || 'Unknown error'}`);
             }
+            // Auswahl nur bei Erfolg zurücksetzen? Oder immer?
             setSelectedUnitForPlacement(null); // Clear selection after attempt
         });
         setPlacementPreviewPosition(null); // Reset preview
@@ -236,29 +316,70 @@ export const PlacementSystem: React.FC<PlacementSystemProps> = ({
     if (!gameState || gameState.phase !== 'Preparation' || playerId === null || selfPlayer === null || playerMinZ === null || playerMaxZ === null) {
         return null;
     }
+    
+    // Berechne die Details der Interaktionsebene neu, da sie von playerMinZ/MaxZ abhängen
+    const playerZoneWidth = GRID_MAX_X - GRID_MIN_X;
+    const playerZoneDepth = playerMaxZ - playerMinZ;
+    const playerZoneCenterX = (GRID_MIN_X + GRID_MAX_X) / 2; // Should be 0
+    const playerZoneCenterZ = (playerMinZ + playerMaxZ) / 2;
 
     return (
         <>
-            {/* Unsichtbare Ebene für Interaktion NUR wenn eine Einheit ausgewählt ist */}
-            {selectedUnitForPlacement && (
-                <Plane
-                    args={[playerZoneWidth, playerZoneDepth]}
-                    position={[playerZoneCenterX, 0.005, playerZoneCenterZ]} // Minimal über Boden, unter Highlights
-                    rotation={[-Math.PI / 2, 0, 0]}
-                    visible={false}
-                    onPointerMove={handlePlacementPointerMove}
-                    onPointerOut={handlePlacementPointerOut}
-                    onClick={handlePlacementClick}
-                />
-            )}
-
-            {/* Visuelle Hilfen */}
+            {/* Highlight für die eigene Platzierungszone */}
             <PlacementZoneHighlight gameState={gameState} playerId={playerId} />
 
-            {selectedUnitForPlacement && placementPreviewPosition && (
+            {/* Visualisierung der besetzten Zellen (Gelb) */}
+            {Array.from(occupiedCells).map(cellKey => {
+                const [xStr, zStr] = cellKey.split(',');
+                const x = parseInt(xStr, 10);
+                const z = parseInt(zStr, 10);
+                // Rendere nur, wenn die Zelle in der Spielerzone liegt
+                if (z >= playerMinZ && z < playerMaxZ) {
+                    return (
+                        <Plane 
+                            key={`occupied-${x}-${z}`}
+                            args={[1, 1]} // Größe einer Zelle
+                            position={[x + 0.5, 0.02, z + 0.5]} // Leicht über dem Boden
+                            rotation={[-Math.PI / 2, 0, 0]}
+                        >
+                            <meshBasicMaterial 
+                                color="yellow" 
+                                transparent 
+                                opacity={0.3} 
+                                side={THREE.DoubleSide} 
+                                depthWrite={false}
+                            />
+                        </Plane>
+                    );
+                }
+                return null;
+            })}
+
+            {/* Interaktionsebene, Vorschau und Gitter nur wenn Einheit ausgewählt ist */}
+            {selectedUnitForPlacement && (
                 <>
-                    <PlacementPreviewMesh unit={selectedUnitForPlacement} position={placementPreviewPosition} />
-                    <PlacementGridCursor unit={selectedUnitForPlacement} previewPosition={placementPreviewPosition} />
+                    {/* Unsichtbare Ebene für Maus-Events */}
+                    <Plane
+                        args={[playerZoneWidth, playerZoneDepth]}
+                        position={[playerZoneCenterX, 0.01, playerZoneCenterZ]} // Position und Größe basierend auf Spielerzone
+                        rotation={[-Math.PI / 2, 0, 0]}
+                        visible={false} // Unsichtbar, nur für Pointer Events
+                        onPointerMove={handlePlacementPointerMove}
+                        onPointerOut={handlePlacementPointerOut}
+                        onClick={handlePlacementClick} // Klick-Handler hier
+                    />
+                    {/* Sichtbare Vorschau (Rot/Grün) */} 
+                    {placementPreviewPosition && (
+                        <PlacementPreviewMesh 
+                            unit={selectedUnitForPlacement} 
+                            position={placementPreviewPosition} 
+                            isValid={isCurrentPlacementValid}
+                        />
+                    )}
+                    {/* Optional: Platzierungsgitter anzeigen */} 
+                    {placementPreviewPosition && (
+                       <PlacementGridCursor unit={selectedUnitForPlacement} previewPosition={placementPreviewPosition}/>
+                    )}
                 </>
             )}
         </>
