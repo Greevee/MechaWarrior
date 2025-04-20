@@ -3,7 +3,7 @@ import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Box, Plane, Sphere, useGLTF, Billboard, useTexture, Line, Html, Stats, Sky } from '@react-three/drei';
 import * as THREE from 'three';
 import { PlacedUnit, GameState as ClientGameState, FigureState, ProjectileState, FigureBehaviorState, GamePhase } from '../types/game.types';
-import { placeholderUnits, Unit } from '../../../server/src/units/unit.types';
+import { placeholderUnits, Unit, Weapon } from '../../../server/src/units/unit.types';
 import './GameScreen.css';
 import PlacementSystem from './PlacementSystem.tsx';
 import ErrorBoundary from './ErrorBoundary';
@@ -902,24 +902,35 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
   const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); 
 
-  // +++ NEU: Gruppiere Projektile nach Render-Typ +++
+  // +++ NEU: Gruppiere Projektile nach Render-Typ und WAFFEN-ID +++
   const { imageProjectilesGrouped, computerProjectilesWithConfig } = useMemo(() => {
-    const imgGroups: { [key: string]: ProjectileState[] } = {}; // Für Instanced Meshes
-    const compWithConfig: { projectile: ProjectileState, config: Unit }[] = []; // Für Linien
+    // WICHTIG: imgGroups jetzt nach weaponId gruppieren!
+    const imgGroups: { [weaponId: string]: ProjectileState[] } = {}; 
+    // compWithConfig speichert jetzt { projectile, weaponData }
+    const compWithConfig: { projectile: ProjectileState, weaponData: Weapon }[] = []; 
 
     activeProjectiles.forEach(p => {
+        // Finde zuerst die Unit-Daten (für Kontext, falls nötig)
         const unitData = placeholderUnits.find(u => u.id === p.unitTypeId);
-        if (!unitData) return; // Einheit nicht gefunden, überspringen
+        if (!unitData || !unitData.weapons) return; // Einheit oder Waffen nicht gefunden, überspringen
 
-        if (unitData.weapons && unitData.weapons.length > 0 && unitData.weapons[0]?.projectileRenderType === 'computer') {
-            // Füge Projektil und seine Konfiguration zur Liste hinzu
-            compWithConfig.push({ projectile: p, config: unitData });
-        } else { // Annahme: 'image'
-            // Gruppiere nach unitTypeId für Instancing
-            if (!imgGroups[p.unitTypeId]) {
-                imgGroups[p.unitTypeId] = [];
+        // Finde die spezifischen Waffen-Daten anhand der weaponId aus dem Projektil
+        const weaponData = unitData.weapons.find(w => w.id === p.weaponId);
+        if (!weaponData) { // Waffe nicht in Unit-Definition gefunden, überspringen
+             console.warn(`Weapon ${p.weaponId} not found for unit ${p.unitTypeId} while processing projectile ${p.projectileId}`);
+             return; 
+        }
+
+        // Entscheide basierend auf dem Render-Typ der *spezifischen* Waffe
+        if (weaponData.projectileRenderType === 'computer') {
+            // Füge Projektil und seine *Waffen*-Konfiguration zur Liste hinzu
+            compWithConfig.push({ projectile: p, weaponData: weaponData });
+        } else { // Annahme: 'image' oder nicht definiert -> 'image' als Default?
+            // Gruppiere nach weaponId für Instancing
+            if (!imgGroups[p.weaponId]) {
+                imgGroups[p.weaponId] = [];
             }
-            imgGroups[p.unitTypeId].push(p);
+            imgGroups[p.weaponId].push(p);
         }
     });
     return { imageProjectilesGrouped: imgGroups, computerProjectilesWithConfig: compWithConfig };
@@ -1086,31 +1097,33 @@ const GameScreen: React.FC<GameScreenProps> = ({
             />
         ))}
 
-        {/* 1. Computer-gerenderte Projektile (Linien) */}
-        {computerProjectilesWithConfig.map(({ projectile, config }) => {
-            // Hole die erste Waffe aus der Konfiguration (config ist unitData)
-            const weaponConfig = config?.weapons[0]; 
+        {/* 1. Computer-gerenderte Projektile (Linien) */} 
+        {computerProjectilesWithConfig.map(({ projectile, weaponData }) => {
+            // Hole die Konfiguration direkt aus den übergebenen weaponData
             return (
                 <LineProjectileEffect
                     key={projectile.projectileId}
                     projectile={projectile}
-                    // Übergebe Konfigurationswerte aus der ersten Waffe (weaponConfig) (mit Defaults)
-                    color={weaponConfig?.projectileColor ?? '#FFFF00'} 
-                    linewidth={weaponConfig?.projectileLineWidth ?? 1}
-                    trailLength={weaponConfig?.projectileTrailLength ?? 0.6}
-                    offsetY={weaponConfig?.projectileOffsetY ?? 0.5}
-                    forwardOffset={weaponConfig?.projectileForwardOffset ?? 0.2}
+                    // Übergebe Konfigurationswerte aus den spezifischen weaponData (mit Defaults)
+                    color={weaponData.projectileColor ?? '#FFFF00'} 
+                    linewidth={weaponData.projectileLineWidth ?? 1}
+                    trailLength={weaponData.projectileTrailLength ?? 0.6}
+                    offsetY={weaponData.projectileOffsetY ?? 0.5}
+                    forwardOffset={weaponData.projectileForwardOffset ?? 0.2}
                 />
             );
         })}
         
-        {/* 2. Bild-basierte Projektile (Instanced Sprites) */}
-        {Object.entries(imageProjectilesGrouped).map(([unitTypeId, projectilesOfType]) => {
-             // Fallback/Suspense Logik bleibt ähnlich
-             const unitData = placeholderUnits.find(u => u.id === unitTypeId);
-             const groupKey = `projectiles-${unitTypeId}`;
+        {/* 2. Bild-basierte Projektile (Instanced Sprites) */} 
+        {/* Iteriere über die nach weaponId gruppierten Projektile */}
+        {Object.entries(imageProjectilesGrouped).map(([weaponId, projectilesOfType]) => {
+             // Hole die unitTypeId vom ersten Projektil (wird für Key/Fallback benötigt)
+             const unitTypeId = projectilesOfType[0]?.unitTypeId;
+             if (!unitTypeId) return null; // Sicherheitshalber
 
-             // Rendere nichts, wenn keine Projektile dieses Typs da sind (redundant? InstancedMesh checkt count)
+             const groupKey = `projectiles-${unitTypeId}-${weaponId}`;
+
+             // Rendere nichts, wenn keine Projektile da sind
              if (projectilesOfType.length === 0) {
                  return null;
              }
@@ -1118,22 +1131,24 @@ const GameScreen: React.FC<GameScreenProps> = ({
              return (
                  <ErrorBoundary
                      key={`${groupKey}-boundary`}
-                     fallback={
+                     fallback={ /* Fallback Mesh bleibt gleich */
                           <mesh position={[0, 0.5, 25]}> 
                              <sphereGeometry args={[0.2, 8, 8]} />
                              <meshStandardMaterial color="red" />
                          </mesh>
                      }
                  >
-                     <Suspense fallback={
+                     <Suspense fallback={ /* Fallback Mesh bleibt gleich */
                           <mesh position={[0, 0.5, 25]}> 
                              <sphereGeometry args={[0.2, 8, 8]} />
                              <meshStandardMaterial color="yellow" wireframe />
                          </mesh>
                      }>
                          <InstancedProjectileMeshes
-                             key={groupKey}
-                             unitTypeId={unitTypeId}
+                             key={groupKey} // Key beinhaltet jetzt unitTypeId und weaponId
+                             // unitTypeId wird weiterhin übergeben, da InstancedProjectileMeshes es intern noch verwendet
+                             // (z.B. um scaleModifier zu holen - TODO: Das könnte man auch an weaponData koppeln)
+                             unitTypeId={unitTypeId} 
                              projectiles={projectilesOfType}
                          />
                      </Suspense>
