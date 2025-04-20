@@ -45,276 +45,268 @@ const HealthBar: React.FC<{ currentHP: number, maxHP: number, scale: number }> =
     );
 });
 
-// --- Figure Mesh Component --- 
-const FigureMesh: React.FC<{ figureData: FigureState, gamePhase: GamePhase }> = React.memo(({ figureData, gamePhase }) => {
-    const meshRef = useRef<THREE.Group>(null!); 
-    const interpolatedPosition = useRef(new THREE.Vector3(figureData.position.x, 0, figureData.position.z));
-    const targetPosition = useMemo(() => new THREE.Vector3(figureData.position.x, 0, figureData.position.z), [
-        figureData.position.x, figureData.position.z
+// +++ NEU: FigureSprite Component (enthält die visuelle Darstellung und Animation) +++
+interface FigureSpriteProps {
+    figureId: string;
+    unitTypeId: string; // Für Texturpfad
+    behavior: FigureBehaviorState;
+    attackCooldownEnd: number; // Für Rückstoß-Trigger
+    position: { x: number; z: number }; // Nur X/Z für Zielposition
+    modelScale: number;
+    moveBobbingFrequency: number;
+    moveBobbingAmplitude: number;
+    recoilDurationMs: number;
+    recoilDistance: number;
+    spriteWidth: number;
+    spriteHeight: number;
+    texturePath: string; // Direkter Pfad zur Textur
+    onClick: (event: any) => void; // Click Handler
+    gamePhase: GamePhase; // Für Ausrichtung in Preparation
+}
+
+const FigureSprite: React.FC<FigureSpriteProps> = React.memo(({
+    figureId,
+    unitTypeId, // Wird noch für Debugging benötigt?
+    behavior,
+    attackCooldownEnd,
+    position,
+    modelScale, // Wird aktuell nicht direkt genutzt, aber ggf. für Skalierung? Behalten wir erstmal.
+    moveBobbingFrequency,
+    moveBobbingAmplitude,
+    recoilDurationMs,
+    recoilDistance,
+    spriteWidth,
+    spriteHeight,
+    texturePath,
+    onClick,
+    gamePhase,
+}) => {
+    const meshRef = useRef<THREE.Group>(null!);
+    // Initialposition mit korrektem Y-Offset (halbe Höhe)
+    const yOffset = spriteHeight / 2;
+    const interpolatedPosition = useRef(new THREE.Vector3(position.x, yOffset, position.z));
+    const targetPosition = useMemo(() => new THREE.Vector3(position.x, yOffset, position.z), [
+        position.x, position.z, yOffset // Y-Offset hinzufügen
     ]);
     const lastPosition = useRef(new THREE.Vector3().copy(interpolatedPosition.current));
-    const [yOffset, setYOffset] = useState(0);
-    const facingScaleX = useRef(1); // Ref für die horizontale Ausrichtung (1 = rechts, -1 = links)
-    const { setSelectedFigureId } = useGameStore(); // NEU: Setter für FigureId holen
-    const prevBehaviorRef = useRef<FigureBehaviorState>(figureData.behavior); // Vorheriges Verhalten speichern
-    // NEU: Ref für vorherigen Cooldown-Wert
-    const prevAttackCooldownEndRef = useRef<number>(figureData.attackCooldownEnd);
-
-    // NEU: Ref für Rückstoß-Animation
+    const facingScaleX = useRef(1);
+    const prevBehaviorRef = useRef<FigureBehaviorState>(behavior);
+    const prevAttackCooldownEndRef = useRef<number>(attackCooldownEnd);
     const recoilStartTime = useRef<number | null>(null);
-    const recoilOffsetX = useRef(0); // NEU: Ref für den Offset, um Linter-Fehler zu beheben
+    const recoilOffsetX = useRef(0);
+    const movementDirection = useMemo(() => new THREE.Vector3(), []);
 
-    // +++ NEU: Wiederverwendbare Vektoren für useFrame +++
-    const movementDirection = useMemo(() => new THREE.Vector3(), []); 
-
-    const unitData = useMemo(() => placeholderUnits.find(u => u.id === figureData.unitTypeId), [figureData.unitTypeId]);
-    const modelScale = unitData?.modelScale ?? 1;
-    const maxHP = unitData?.hp ?? 100; 
-
-    // --- Sprite Loading ---
-    // Hilfsfunktion zum Erstellen des dynamischen Pfads
-    const getTexturePath = (unitTypeId: string, behavior: FigureBehaviorState): string => {
-        // ACHTUNG: unitTypeId muss exakt dem Ordnernamen entsprechen (Groß/Kleinschreibung)!
-        // Gib einfach den primären Pfad zurück. Das Laden/Fehlerbehandlung erfolgt durch useTexture/Suspense/ErrorBoundary.
-        return `/assets/units/${unitTypeId}/${behavior}.png`;
-    };
-
-    // Erstelle den Pfad basierend auf dem aktuellen Zustand
-    const texturePath = useMemo(() => {
-         return getTexturePath(figureData.unitTypeId, figureData.behavior);
-    }, [figureData.unitTypeId, figureData.behavior]); // Neu berechnen, wenn sich Typ oder Verhalten ändert
-
-    // Lade die dynamische Textur
-    // Wenn dieser Pfad ungültig ist, wirft useTexture einen Fehler, der von einer
-    // React Error Boundary oder dem Suspense Fallback (je nach Konfiguration)
-    // behandelt werden muss.
-    const spriteTexture = useTexture(texturePath); 
-    
-    // Ladefehler abfangen und Standardwerte verwenden (für Aspect Ratio)
-    const aspectWidth = spriteTexture?.image?.width ?? 1;
-    const aspectHeight = spriteTexture?.image?.height ?? 1;
-    const spriteAspect = aspectWidth / aspectHeight;
-
-    const spriteHeight = 1.0 * modelScale; // Basis-Höhe, skaliert mit modelScale
-    const spriteWidth = spriteHeight * spriteAspect;
+    // Lade die Textur mit dem übergebenen Pfad
+    // Fehler/Suspense wird von der ErrorBoundary/Suspense in PlacedUnitMesh behandelt
+    const spriteTexture = useTexture(texturePath);
 
     // Effekt zum Setzen des Farbraums der Textur
     useEffect(() => {
         if (spriteTexture) {
-            spriteTexture.colorSpace = THREE.SRGBColorSpace; // Explizit setzen
+            spriteTexture.colorSpace = THREE.SRGBColorSpace;
             spriteTexture.needsUpdate = true;
         }
     }, [spriteTexture]);
 
-    // Einfacher Y-Offset für Sprites (halbe Höhe)
+    // Effekt zum Starten der Rückstoßanimation
     useEffect(() => {
-        setYOffset(spriteHeight / 2);
-    }, [spriteHeight]);
-
-    // NEU: Effekt zum Starten der Rückstoßanimation - JETZT BASIEREND AUF COOLDOWN
-    useEffect(() => {
-        // Nur auslösen, wenn sich der Cooldown geändert hat UND die Figur angreift
-        if (figureData.attackCooldownEnd !== prevAttackCooldownEndRef.current && 
-            figureData.behavior === 'attacking') {
+        if (attackCooldownEnd !== prevAttackCooldownEndRef.current && behavior === 'attacking') {
             recoilStartTime.current = Date.now();
-            // console.log(`Figure ${figureData.figureId} starts recoil (cooldown change)`);
         }
-        // Aktuellen Cooldown für den nächsten Vergleich speichern
-        prevAttackCooldownEndRef.current = figureData.attackCooldownEnd;
-        // Aktuelles Verhalten für den nächsten Vergleich speichern (optional, kann aber bleiben)
-        prevBehaviorRef.current = figureData.behavior;
-    }, [figureData.attackCooldownEnd, figureData.behavior, figureData.figureId]); // Abhängigkeiten aktualisiert
+        prevAttackCooldownEndRef.current = attackCooldownEnd;
+        prevBehaviorRef.current = behavior; // Verhalten auch speichern, falls benötigt
+    }, [attackCooldownEnd, behavior]);
 
     useFrame((state, delta) => {
-        // --- NEU: Hüpf-Offset Berechnung ---
         let bobbingOffsetY = 0;
-        if (figureData.behavior === 'moving') {
-            const frequency = unitData?.moveBobbingFrequency ?? 0; // Standard: Kein Hüpfen
-            const amplitude = unitData?.moveBobbingAmplitude ?? 0; // Standard: Kein Hüpfen
-
-            if (frequency > 0 && amplitude > 0) {
-                // state.clock.elapsedTime gibt die seit Start vergangene Zeit in Sekunden
-                bobbingOffsetY = Math.sin(state.clock.elapsedTime * frequency * 2 * Math.PI) * amplitude;
+        if (behavior === 'moving') {
+            if (moveBobbingFrequency > 0 && moveBobbingAmplitude > 0) {
+                bobbingOffsetY = Math.sin(state.clock.elapsedTime * moveBobbingFrequency * 2 * Math.PI) * moveBobbingAmplitude;
             }
         }
 
-        // --- Zielposition Berechnung (inkl. Standard-Y-Offset und Hüpfen) ---
-        // Der Standard-Y-Offset (halbe Sprite-Höhe) wird immer angewendet
-        // Der bobbingOffsetY wird nur bei Bewegung hinzugefügt
         const finalTargetY = yOffset + bobbingOffsetY;
-        targetPosition.set(figureData.position.x, finalTargetY, figureData.position.z);
+        targetPosition.set(position.x, finalTargetY, position.z);
 
-        // --- Positionsinterpolation (bleibt gleich, zielt jetzt auf finalTargetY) ---
         interpolatedPosition.current.lerp(targetPosition, 0.1);
-        
-        // +++ NEU: Wiederverwendeten Vektor nutzen +++
         movementDirection.copy(interpolatedPosition.current).sub(lastPosition.current);
         lastPosition.current.copy(interpolatedPosition.current);
 
-        const moveThreshold = 0.001; // Kleiner Schwellenwert
-        const centerZ = 25; // Mittellinie
+        const moveThreshold = 0.001;
+        const centerZ = 25;
 
-        // Priorität 1: Im Kampf (attacking) immer zum Gegner (basierend auf Z)
-        if (figureData.behavior === 'attacking') {
-            if (figureData.position.z < centerZ) {
-                facingScaleX.current = 1; 
-            } else {
-                facingScaleX.current = -1;
-            }
-        // Priorität 2: In Vorbereitung (Preparation) und untätig (idle) immer zum Gegner (basierend auf Z)
-        } else if (gamePhase === 'Preparation' && figureData.behavior === 'idle') {
-             if (figureData.position.z < centerZ) {
-                facingScaleX.current = 1; 
-            } else {
-                facingScaleX.current = -1;
-            }
-        // Priorität 3: Ansonsten (moving oder idle außerhalb von Preparation) basierend auf Bewegung
+        if (behavior === 'attacking') {
+            if (position.z < centerZ) facingScaleX.current = 1; else facingScaleX.current = -1;
+        } else if (gamePhase === 'Preparation' && behavior === 'idle') {
+            if (position.z < centerZ) facingScaleX.current = 1; else facingScaleX.current = -1;
         } else {
-            // NUR Richtung ändern, wenn Bewegung über dem Schwellenwert liegt
             if (movementDirection.z < -moveThreshold) {
-                facingScaleX.current = -1; // Nach -Z bewegen
+                facingScaleX.current = -1;
             } else if (movementDirection.z > moveThreshold) {
-                facingScaleX.current = 1; // Nach +Z bewegen
+                facingScaleX.current = 1;
             }
-            // WENN Bewegung unter dem Schwellenwert liegt, wird facingScaleX.current NICHT geändert
-            // und behält seinen vorherigen Wert bei.
         }
 
-        // --- NEU: Rückstoß-Offset Berechnung ---
         if (recoilStartTime.current !== null) {
-            // Werte aus unitData holen oder Standardwerte verwenden
-            const recoilDuration = unitData?.recoilDurationMs ?? 150; // Standard: 150ms
-            const recoilDistance = unitData?.recoilDistance ?? 0.15; // Standard: 0.15
-
             const elapsedTime = Date.now() - recoilStartTime.current;
-            if (elapsedTime < recoilDuration) {
-                // Einfache Sinus-Halbwelle für einen weichen Ein-/Ausstieg
-                const progress = elapsedTime / recoilDuration;
+            if (elapsedTime < recoilDurationMs) {
+                const progress = elapsedTime / recoilDurationMs;
                 const recoilAmount = Math.sin(progress * Math.PI) * recoilDistance;
-                // Richtung ist entgegengesetzt zur Blickrichtung (facingScaleX)
-                recoilOffsetX.current = -facingScaleX.current * recoilAmount; // Wert in Ref speichern
+                recoilOffsetX.current = -facingScaleX.current * recoilAmount;
             } else {
-                // Animation beendet, Zeit zurücksetzen
                 recoilStartTime.current = null;
-                recoilOffsetX.current = 0; // Offset zurücksetzen
-                // console.log(`Figure ${figureData.figureId} ends recoil`);
+                recoilOffsetX.current = 0;
             }
         } else {
-            // Sicherstellen, dass der Offset 0 ist, wenn keine Animation läuft
-            recoilOffsetX.current = 0;
+             recoilOffsetX.current = 0; // Sicherstellen, dass Offset 0 ist
         }
 
         if (meshRef.current) {
             meshRef.current.position.copy(interpolatedPosition.current);
-             // Skalierung wird jetzt über die Plane-args gesteuert, nicht mehr über die Group
-            // meshRef.current.scale.set(modelScale, modelScale, modelScale); // Entfernt
-
-            // Sprite-Ausrichtung zur Bewegungsrichtung (optional, hier vereinfacht)
-            // const moveLengthSq = movementDirection.lengthSq();
-            // if (moveLengthSq > 0.0001) { 
-                 // const angle = Math.atan2(movementDirection.x, movementDirection.z);
-                 // Bei Billboards ist Rotation oft nicht nötig oder wirkt seltsam.
-                 // meshRef.current.rotation.y = THREE.MathUtils.lerp(meshRef.current.rotation.y, angle, 0.1);
-            // }
         }
     });
 
-    const handleClick = (event: any) => {
-        event.stopPropagation(); 
-        console.log(`Figure clicked: ${figureData.figureId}`);
-        setSelectedFigureId(figureData.figureId); // NEU: Setze FigureId
+    return (
+        <group ref={meshRef} onClick={onClick}>
+            <Billboard>
+                <Plane
+                    args={[spriteWidth, spriteHeight]}
+                    scale={[facingScaleX.current, 1, 1]}
+                    position={[recoilOffsetX.current, 0, 0]}
+                >
+                    <meshBasicMaterial
+                        color="white"
+                        map={spriteTexture}
+                        transparent={true}
+                        side={THREE.DoubleSide}
+                        alphaTest={0.1}
+                    />
+                </Plane>
+            </Billboard>
+        </group>
+    );
+});
+
+// --- Figure Mesh Component (Wrapper für Sprite und HealthBar) ---
+// +++ NEU: Akzeptiert jetzt granulare Props +++
+interface FigureMeshProps {
+    figureId: string;
+    unitTypeId: string;
+    behavior: FigureBehaviorState;
+    attackCooldownEnd: number;
+    position: { x: number; z: number };
+    currentHP: number;
+    gamePhase: GamePhase;
+    // Keine figureData mehr!
+}
+
+const FigureMesh: React.FC<FigureMeshProps> = React.memo(({
+    figureId,
+    unitTypeId,
+    behavior,
+    attackCooldownEnd,
+    position,
+    currentHP,
+    gamePhase,
+}) => {
+    const { setSelectedFigureId } = useGameStore();
+
+    // Hole Unit-Daten basierend auf unitTypeId
+    const unitData = useMemo(() => placeholderUnits.find(u => u.id === unitTypeId), [unitTypeId]);
+    const modelScale = unitData?.modelScale ?? 1;
+    const maxHP = unitData?.hp ?? 100;
+    const moveBobbingFrequency = unitData?.moveBobbingFrequency ?? 0;
+    const moveBobbingAmplitude = unitData?.moveBobbingAmplitude ?? 0;
+    const recoilDurationMs = unitData?.recoilDurationMs ?? 150;
+    const recoilDistance = unitData?.recoilDistance ?? 0.15;
+
+    // --- Berechne Sprite-Dimensionen und Pfad ---
+    // Hilfsfunktion bleibt lokal oder wird ausgelagert
+    const getTexturePath = (typeId: string, currentBehavior: FigureBehaviorState): string => {
+        return `/assets/units/${typeId}/${currentBehavior}.png`;
     };
+    const texturePath = useMemo(() => getTexturePath(unitTypeId, behavior), [unitTypeId, behavior]);
+
+    // Lade Textur *hier temporär*, nur um die Dimensionen zu bekommen.
+    // IDEAL: Dimensionen sollten Teil der unitData sein oder anders bezogen werden,
+    // um doppelten Ladevorgang (hier und in FigureSprite) zu vermeiden.
+    // Workaround: Wir laden sie hier, um Aspect Ratio zu berechnen.
+    // TODO: Refaktorieren, um Textur-Dimensionen aus unitData zu holen.
+    const tempTexture = useTexture(texturePath);
+    const aspectWidth = tempTexture?.image?.width ?? 1;
+    const aspectHeight = tempTexture?.image?.height ?? 1;
+    const spriteAspect = aspectWidth / aspectHeight;
+    const spriteHeight = 1.0 * modelScale;
+    const spriteWidth = spriteHeight * spriteAspect;
+
+    // Klick-Handler
+    const handleClick = useCallback((event: any) => {
+        event.stopPropagation();
+        console.log(`Figure clicked: ${figureId}`);
+        setSelectedFigureId(figureId);
+    }, [figureId, setSelectedFigureId]); // Abhängigkeiten korrekt setzen
 
     return (
-        // Group wird NUR noch positioniert
-        <group ref={meshRef} key={figureData.figureId} onClick={handleClick}>
-            <Billboard>             
-                 {/* Original Sprite-Plane */}
-                 <Plane 
-                    args={[spriteWidth, spriteHeight]} 
-                    scale={[facingScaleX.current, 1, 1]}
-                    position={[recoilOffsetX.current, 0, 0]} // Horizontaler Offset für Rückstoß (Wert aus Ref lesen)
-                >
-                      <meshBasicMaterial
-                         color="white" // Explizit auf Weiß setzen
-                         map={spriteTexture} // Verwende die dynamisch geladene Textur
-                         transparent={true}
-                         side={THREE.DoubleSide} 
-                         alphaTest={0.1} 
-                     />
-                 </Plane>
-            </Billboard>
-            {figureData.currentHP < maxHP && 
-                 // Position der HealthBar relativ zur Sprite-Höhe anpassen
-                 // Skaliere HealthBar relativ zur Sprite-Breite
-                 <group position={[0, spriteHeight, 0]}> {/* Leicht über dem Sprite */}
-                    <HealthBar currentHP={figureData.currentHP} maxHP={maxHP} scale={spriteWidth * 0.8} /> 
+        // Leere Gruppe als Container, Key hier nicht mehr nötig, da in PlacedUnitMesh
+        <group>
+            {/* Rendere die Sprite-Komponente mit allen notwendigen Props */}
+            <FigureSprite
+                figureId={figureId}
+                unitTypeId={unitTypeId}
+                behavior={behavior}
+                attackCooldownEnd={attackCooldownEnd}
+                position={position}
+                modelScale={modelScale}
+                moveBobbingFrequency={moveBobbingFrequency}
+                moveBobbingAmplitude={moveBobbingAmplitude}
+                recoilDurationMs={recoilDurationMs}
+                recoilDistance={recoilDistance}
+                spriteWidth={spriteWidth}
+                spriteHeight={spriteHeight}
+                texturePath={texturePath}
+                onClick={handleClick}
+                gamePhase={gamePhase}
+            />
+            {/* Rendere HealthBar nur wenn nötig */}
+            {currentHP < maxHP &&
+                 <group position={[position.x, spriteHeight + 0.1, position.z]}> {/* Positioniere relativ */}
+                    <HealthBar currentHP={currentHP} maxHP={maxHP} scale={spriteWidth * 0.8} />
                  </group>
             }
         </group>
     );
 });
 
-// Eine Fallback-Komponente, die den Placeholder rendert
-// Wird benötigt, da wir Props an FigureMesh übergeben müssen.
-const FigurePlaceholderFallback: React.FC<{ figureData: FigureState }> = ({ figureData }) => {
-    // Erstelle ein modifiziertes figureData-Objekt, das nur den Placeholder-Pfad verwendet
-    const placeholderFigureData = useMemo(() => ({
-        ...figureData,
-        // Überschreibe behavior temporär, um sicherzustellen, dass getTexturePath
-        // nicht erneut fehlschlägt, wenn wir es komplexer machen würden.
-        // Oder, noch einfacher: Wir laden die Textur direkt mit dem Placeholder-Pfad.
-        // (Wir bleiben bei der jetzigen Struktur, wo useTexture den Pfad nimmt)
-    }), [figureData]);
-
-    // Wir geben die originalen figureData weiter, aber der `useTexture` Aufruf 
-    // IN DER ERROR BOUNDARY wird den Fehler auslösen und DIESE Komponente rendern.
-    // Eine bessere Lösung wäre, einen spezifischen Prop für den Pfad zu haben.
-    // Für jetzt: Wir übergeben die originalen Daten und verlassen uns darauf,
-    // dass die ErrorBoundary *diese* Instanz rendert.
-    
-    // ALTERNATIVE (Sauberer): FigureMesh so umbauen, dass es einen texturePath-Prop akzeptiert.
-    // Dann könnte man hier aufrufen: <FigureMesh figureData={figureData} texturePath="/assets/units/placeholder/figure_placeholder.png" />
-    
-    // Aktueller Ansatz: Rendere FigureMesh normal, die Boundary fängt den Fehler.
-    // Der Fallback der Boundary ist dann ein einfacher Text oder eine andere Komponente.
-    // Wir müssen den Fallback also in der Nutzung der ErrorBoundary definieren.
-    
-    // Simplifizierter Fallback: Einfach nichts oder eine Box rendern?
-    // return <Box args={[1, 1, 1]} position={[figureData.position.x, 0.5, figureData.position.z]} />; 
-    // Vorerst geben wir NULL zurück, die Boundary zeigt die globale Meldung.
-    return null; 
-};
-
-// --- Placed Unit Mesh (rendert jetzt FigureMesh-Komponenten) ---
-// --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary) ---
+// --- Placed Unit Mesh (rendert jetzt FigureMesh mit Error Boundary und granularen Props) ---
 const PlacedUnitMesh: React.FC<{ placedUnit: PlacedUnit, gamePhase: GamePhase }> = React.memo(({ placedUnit, gamePhase }) => {
     return (
-        <group userData={{ unitInstanceId: placedUnit.instanceId }}> 
+        <group userData={{ unitInstanceId: placedUnit.instanceId }}>
             {placedUnit.figures.map((figure: FigureState) => {
-                // Jede Figur wird von einer ErrorBoundary umschlossen.
+                // +++ NEU: Extrahiere Props für FigureMesh +++
+                const { figureId, unitTypeId, behavior, attackCooldownEnd, position, currentHP } = figure;
+
+                // Definiere den Fallback für diese Figur
+                const fallbackMesh = (color: string, wireframe = false) => (
+                    <mesh position={[position.x, 0.5, position.z]}>
+                        <boxGeometry args={[0.5, 0.5, 0.5]} />
+                        <meshStandardMaterial color={color} wireframe={wireframe} />
+                    </mesh>
+                );
+
                 return (
-                    <ErrorBoundary 
-                        key={figure.figureId} 
-                        fallback={
-                            // Definiere hier den Fallback, der angezeigt wird, wenn useTexture in FigureMesh fehlschlägt.
-                            // Wir rendern eine einfache Box an der Position der Figur als visuellen Hinweis.
-                            <mesh position={[figure.position.x, 0.5, figure.position.z]}>
-                                <boxGeometry args={[0.5, 0.5, 0.5]} />
-                                <meshStandardMaterial color="red" />
-                            </mesh>
-                        }
+                    <ErrorBoundary
+                        key={figureId} // Key hier setzen!
+                        fallback={fallbackMesh("red")}
                     >
-                        {/* Suspense für das Laden der Textur in FigureMesh */}
-                        <Suspense fallback={
-                            // Optional: Ein anderer Fallback *während* des Ladens (kann auch die rote Box sein)
-                            <mesh position={[figure.position.x, 0.5, figure.position.z]}>
-                                <boxGeometry args={[0.5, 0.5, 0.5]} />
-                                <meshStandardMaterial color="yellow" wireframe />
-                            </mesh>
-                        }>
-                            <FigureMesh 
-                                figureData={figure}
+                        <Suspense fallback={fallbackMesh("yellow", true)}>
+                            {/* Übergebe granulare Props an FigureMesh */}
+                            <FigureMesh
+                                figureId={figureId}
+                                unitTypeId={unitTypeId}
+                                behavior={behavior}
+                                attackCooldownEnd={attackCooldownEnd}
+                                position={position} // Position-Objekt ist ok, da es sich oft komplett ändert
+                                currentHP={currentHP}
                                 gamePhase={gamePhase}
                             />
                         </Suspense>
