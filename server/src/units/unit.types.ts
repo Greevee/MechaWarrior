@@ -30,6 +30,19 @@ export interface Unit {
   // NEU: Hüpf-Animation beim Bewegen
   moveBobbingFrequency?: number; // Wie oft pro Sekunde
   moveBobbingAmplitude?: number; // Wie hoch der Sprung ist
+
+  // NEU: Projektil Rendering Konfiguration
+  projectileRenderType: 'image' | 'computer'; // Wie wird das Projektil gerendert?
+
+  // Optional: Nur relevant wenn projectileRenderType === 'computer'
+  projectileColor?: string;
+  projectileLineWidth?: number;
+  projectileTrailLength?: number; // Länge des Linien-Tracers
+  projectileOffsetY?: number;     // Y-Offset der Linie über dem Boden
+  projectileForwardOffset?: number; // Start-Offset der Linie vor der Einheit
+
+  // NEU: Optional: Nur relevant wenn projectileRenderType === 'image'
+  projectileImageScale?: number; // Skalierungsfaktor für das Projektil-Sprite (1 = 100%)
 }
 
 export const placeholderUnits: Unit[] = [
@@ -60,7 +73,14 @@ export const placeholderUnits: Unit[] = [
     recoilDurationMs: 150,
     recoilDistance: 0.1,
     moveBobbingFrequency: 2, // Beispielwert: 2 Sprünge pro Sekunde
-    moveBobbingAmplitude: 0.05 // Beispielwert: Kleine Höhe
+    moveBobbingAmplitude: 0.05, // Beispielwert: Kleine Höhe
+    // NEU: Projektil Rendering
+    projectileRenderType: 'computer',
+    projectileColor: '#ebd686', // Das helle Gelb von vorher
+    projectileLineWidth: 1,
+    projectileTrailLength: 0.3,
+    projectileOffsetY: 0.5,
+    projectileForwardOffset: 0.5
   },
   {
     id: 'human_small_tank',
@@ -82,15 +102,18 @@ export const placeholderUnits: Unit[] = [
     icon: 'human_small_tank_icon',
     speed: 1.5,
     bulletSpeed: 15,
+    impactEffectImage: true,
     collisionRange: 0.5,
     modelScale: 1.2,
     formation: '5x1',
     placementSpread: 0.2,
-    impactEffectImage: true,
     recoilDurationMs: 250,
     recoilDistance: 0.25,
     moveBobbingFrequency: 0.5, // Panzer hüpft langsamer
-    moveBobbingAmplitude: 0.02 // Panzer hüpft weniger hoch
+    moveBobbingAmplitude: 0.02, // Panzer hüpft weniger hoch
+    // NEU: Projektil Rendering (zurück zu 'image')
+    projectileRenderType: 'image',
+    projectileImageScale: 0.5 // NEU: Projektil-Sprite auf 50% Größe skalieren
   }
 ];
 

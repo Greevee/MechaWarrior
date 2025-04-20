@@ -366,8 +366,11 @@ interface InstancedProjectileMeshesProps {
 const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = React.memo(({ unitTypeId, projectiles }) => {
     const meshRef = useRef<THREE.InstancedMesh>(null!); // Ref für InstancedMesh
     const dummyObject = useMemo(() => new THREE.Object3D(), []); // Hilfsobjekt für Matrix-Berechnung
-    // +++ NEU: Wiederverwendbare Vektoren für useFrame +++
     const targetPositionVec = useMemo(() => new THREE.Vector3(), []); 
+
+    // +++ NEU: Hole unitData, um Skalierungsfaktor zu bekommen +++
+    const unitData = useMemo(() => placeholderUnits.find(u => u.id === unitTypeId), [unitTypeId]);
+    const scaleModifier = unitData?.projectileImageScale ?? 1; // Default 1
 
     // --- Sprite Loading (nur einmal pro Typ) ---
     const getProjectileTexturePath = (typeId: string): string => {
@@ -379,9 +382,12 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
     const aspectWidth = spriteTexture?.image?.width ?? 1;
     const aspectHeight = spriteTexture?.image?.height ?? 1;
     const spriteAspect = aspectWidth / aspectHeight;
-    const spriteHeight = 0.3; // Feste Größe für Projektile?
+    
+    // +++ NEU: Wende Skalierungsfaktor an +++
+    const baseSpriteHeight = 0.3; // Basisgröße definieren
+    const spriteHeight = baseSpriteHeight * scaleModifier;
     const spriteWidth = spriteHeight * spriteAspect;
-    const yOffset = spriteHeight / 2;
+    const yOffset = spriteHeight / 2; // Y-Offset basiert auf finaler Höhe
 
     // Textur-Setup
     useEffect(() => {
@@ -465,17 +471,28 @@ const InstancedProjectileMeshes: React.FC<InstancedProjectileMeshesProps> = Reac
 // +++ NEU: Line Projectile Component +++
 interface LineProjectileEffectProps {
     projectile: ProjectileState;
+    // NEU: Konfigurationsparameter als Props
+    color: string;
+    linewidth: number;
+    trailLength: number;
+    offsetY: number;
+    forwardOffset: number;
+    // unitTypeId?: string; // Nicht mehr direkt benötigt?
 }
 
-const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ projectile }) => {
-    // Refs für Start-/Endpunkt der Linie zur Interpolation
-    // Initialisiere mit der Startposition, um "Springen" zu vermeiden
+const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({
+    projectile,
+    // NEU: Destrukturierte Props mit Defaults (Sicherheitsnetz)
+    color = "#FFFF00",
+    linewidth = 1,
+    trailLength = 0.6,
+    offsetY = 0.5,
+    forwardOffset = 0.2,
+}) => {
+    // Refs bleiben gleich
+    const geometryRef = useRef<THREE.BufferGeometry>(null!); 
 
-    const TRAIL_LENGTH = 0.4; // Länge des Linien-Tracers
-    const LINE_Y_OFFSET = 0.5; // Gleicher Y-Offset wie bei Sprites/Instanzen
-    const FORWARD_OFFSET = 0.5; // NEU: Distanz, um die Linie nach vorne zu verschieben
-
-    // Richtung einmalig berechnen (oder wenn sich Ziel ändert? Vorerst konstant)
+    // Richtung einmalig berechnen
     const direction = useMemo(() => {
         return new THREE.Vector3(
             projectile.targetPos.x - projectile.originPos.x,
@@ -484,41 +501,35 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ 
         ).normalize();
     }, [projectile.originPos, projectile.targetPos]);
 
-    // +++ NEU: Wiederverwendbare Vektoren für useFrame und Initialisierung +++
-    const initialOffset = useMemo(() => direction.clone().multiplyScalar(FORWARD_OFFSET), [direction]); // Initial berechnen ok
+    // Wiederverwendbare Vektoren
+    // +++ NEU: Verwende Props für Offsets/Länge bei Initialisierung +++
+    const initialOffsetVec = useMemo(() => direction.clone().multiplyScalar(forwardOffset), [direction, forwardOffset]);
     const offsetVector = useMemo(() => new THREE.Vector3(), []);
     const lerpTarget = useMemo(() => new THREE.Vector3(), []);
     const tempVec = useMemo(() => new THREE.Vector3(), []); // Für Zwischenberechnungen
 
-    // NEU: Initialisiere Endpunkt mit Offset
     const endPointRef = useRef(new THREE.Vector3(
-        projectile.originPos.x + initialOffset.x,
-        LINE_Y_OFFSET,
-        projectile.originPos.z + initialOffset.z
+        projectile.originPos.x + initialOffsetVec.x,
+        offsetY, // NEU: Prop
+        projectile.originPos.z + initialOffsetVec.z
     ));
-    // NEU: Initialisiere Startpunkt basierend auf initialem Endpunkt und Trail-Länge
-    // (Direkt hier berechnen ist ok, da nur einmalig)
-    const startPointRef = useRef(endPointRef.current.clone().sub(tempVec.copy(direction).multiplyScalar(TRAIL_LENGTH)));
-
-    const geometryRef = useRef<THREE.BufferGeometry>(null!); // Ref für die Geometrie selbst
+    // Initialer Startpunkt basiert auf initialem Endpunkt und Trail-Länge
+    const startPointRef = useRef(endPointRef.current.clone().sub(tempVec.copy(direction).multiplyScalar(trailLength))); // NEU: Prop
 
     useFrame(() => {
-        // +++ NEU: Wiederverwendete Vektoren nutzen +++
-        // Zielposition aus Serverdaten holen (lokale Variable OK)
-        const targetEndPoint = tempVec.set(projectile.currentPos.x, LINE_Y_OFFSET, projectile.currentPos.z); // tempVec hier wiederverwenden
+        // Zielposition aus Serverdaten holen
+        const targetEndPoint = tempVec.set(projectile.currentPos.x, offsetY, projectile.currentPos.z); // NEU: Prop offsetY
 
-        // NEU: Zielposition für den Endpunkt mit Offset berechnen
-        offsetVector.copy(direction).multiplyScalar(FORWARD_OFFSET); // offsetVector wiederverwenden
-        lerpTarget.copy(targetEndPoint).add(offsetVector); // lerpTarget wiederverwenden
+        // Zielposition für den Endpunkt mit Offset berechnen
+        offsetVector.copy(direction).multiplyScalar(forwardOffset); // NEU: Prop forwardOffset
+        lerpTarget.copy(targetEndPoint).add(offsetVector);
 
-        // Endpunkt interpolieren (zum offset Ziel)
-        endPointRef.current.lerp(lerpTarget, 0.4); // Etwas schnelleres LERP für Linien?
+        endPointRef.current.lerp(lerpTarget, 0.4); 
 
-        // Startpunkt basierend auf interpoliertem (und verschobenem) Endpunkt und Richtung berechnen
-        // (tempVec wird hier kurz für die Subtraktion wiederverwendet)
-        startPointRef.current.copy(endPointRef.current).sub(tempVec.copy(direction).multiplyScalar(TRAIL_LENGTH)); 
+        // Startpunkt basierend auf Endpunkt und Richtung berechnen
+        startPointRef.current.copy(endPointRef.current).sub(tempVec.copy(direction).multiplyScalar(trailLength)); // NEU: Prop trailLength
 
-        // Update der Geometrie der Linie
+        // Update der Geometrie
         const geom = geometryRef.current;
         if (geom) {
             const positions = geom.attributes.position.array as Float32Array;
@@ -528,58 +539,36 @@ const LineProjectileEffect: React.FC<LineProjectileEffectProps> = React.memo(({ 
             positions[3] = endPointRef.current.x;
             positions[4] = endPointRef.current.y;
             positions[5] = endPointRef.current.z;
-            geom.attributes.position.needsUpdate = true; // Wichtig!
-            geom.computeBoundingSphere(); // Wichtig für Sichtbarkeit
-            
-            // DEBUG: Konsolenausgabe (nur bei Bedarf aktivieren)
-            // if (Math.random() < 0.01) { // Nur gelegentlich loggen
-            //     console.log(`Projectile ${projectile.projectileId}: Start [${positions[0].toFixed(1)}, ${positions[1].toFixed(1)}, ${positions[2].toFixed(1)}] End [${positions[3].toFixed(1)}, ${positions[4].toFixed(1)}, ${positions[5].toFixed(1)}]`);
-            // }
+            geom.attributes.position.needsUpdate = true;
+            geom.computeBoundingSphere();
         }
     });
 
-    // Definiere die Geometrie initial mit Platzhalterpunkten
-    // Verwende useMemo, um die Geometrie nur einmal zu erstellen
+    // Geometrie nur einmal erstellen
     const lineGeometry = useMemo(() => {
         const points = [startPointRef.current.clone(), endPointRef.current.clone()];
         const geom = new THREE.BufferGeometry().setFromPoints(points);
         return geom;
-    }, []); // Leeres Abhängigkeitsarray, nur einmal erstellen
+    }, []); 
 
-    // Erstelle das Linienobjekt mit Material manuell für <primitive>
+    // Material wird jetzt dynamisch im useMemo erstellt, um auf Prop-Änderungen zu reagieren
+    // (Obwohl sich color/linewidth selten ändern sollten, ist dies sicherer)
+    const lineMaterial = useMemo(() => new THREE.LineBasicMaterial({
+        color: color, // NEU: Prop
+        linewidth: linewidth, // NEU: Prop
+        transparent: true,
+        opacity: 1
+    }), [color, linewidth]);
+
+    // Linienobjekt mit Ref zur Geometrie
     const lineObject = useMemo(() => {
-        const material = new THREE.LineBasicMaterial({
-            color: "#ebd686", // NEU: Helleres Gelb
-            linewidth: 1,
-            transparent: true,
-            opacity: 1
-        });
-        const line = new THREE.Line(lineGeometry, material);
+        const line = new THREE.Line(lineGeometry, lineMaterial);
+        geometryRef.current = line.geometry as THREE.BufferGeometry; // Weise Ref hier zu
         return line;
-    }, [lineGeometry]); // Nur neu erstellen, wenn sich die Geometrie ändert (sollte nicht)
-
-    // Weise die Ref der Geometrie zu, wenn das Objekt erstellt wird
-    useEffect(() => {
-        if (lineObject) {
-            geometryRef.current = lineObject.geometry as THREE.BufferGeometry;
-        }
-    }, [lineObject]);
+    }, [lineGeometry, lineMaterial]); // Abhängig von Geometrie und Material
 
     return (
-        // Verwende primitive, um Typkonflikte zu vermeiden
         <primitive object={lineObject} />
-        
-        /* // Alte Implementierung entfernt
-        <line geometry={lineGeometry} ref={geometryRef as any /* Type workaround für Ref * /}>
-             <lineBasicMaterial
-                color="yellow"
-                linewidth={1} // Test mit Breite 1
-                transparent={true} // Sicherstellen, dass Transparenz möglich ist
-                opacity={1} // Voll sichtbar
-                // toneMapped={false} // Optional: Verhindert, dass die Linie von Licht beeinflusst wird
-             />
-        </line>
-        */
     );
 });
 // +++ Ende Line Projectile Component +++
@@ -787,21 +776,27 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const activeProjectiles = useMemo(() => gameState?.activeProjectiles ?? [], [gameState?.activeProjectiles]);
   const selfPlayer = useMemo(() => gameState?.players.find(p => p.id === playerId), [gameState, playerId]); 
 
-  // NEU: Gruppiere Projektile und trenne Infanterie-Projektile
-  const { groupedProjectiles, infantryProjectiles } = useMemo(() => {
-    const groups: { [key: string]: ProjectileState[] } = {};
-    const infantry: ProjectileState[] = [];
+  // +++ NEU: Gruppiere Projektile nach Render-Typ +++
+  const { imageProjectilesGrouped, computerProjectilesWithConfig } = useMemo(() => {
+    const imgGroups: { [key: string]: ProjectileState[] } = {}; // Für Instanced Meshes
+    const compWithConfig: { projectile: ProjectileState, config: Unit }[] = []; // Für Linien
+
     activeProjectiles.forEach(p => {
-        if (p.unitTypeId === 'human_infantry') {
-            infantry.push(p);
-        } else {
-            if (!groups[p.unitTypeId]) {
-                groups[p.unitTypeId] = [];
+        const unitData = placeholderUnits.find(u => u.id === p.unitTypeId);
+        if (!unitData) return; // Einheit nicht gefunden, überspringen
+
+        if (unitData.projectileRenderType === 'computer') {
+            // Füge Projektil und seine Konfiguration zur Liste hinzu
+            compWithConfig.push({ projectile: p, config: unitData });
+        } else { // Annahme: 'image'
+            // Gruppiere nach unitTypeId für Instancing
+            if (!imgGroups[p.unitTypeId]) {
+                imgGroups[p.unitTypeId] = [];
             }
-            groups[p.unitTypeId].push(p);
+            imgGroups[p.unitTypeId].push(p);
         }
     });
-    return { groupedProjectiles: groups, infantryProjectiles: infantry };
+    return { imageProjectilesGrouped: imgGroups, computerProjectilesWithConfig: compWithConfig };
   }, [activeProjectiles]);
 
   // Update der aktuell gerenderten Projektil-IDs bei jeder Änderung
@@ -949,54 +944,56 @@ const GameScreen: React.FC<GameScreenProps> = ({
             />
         ))}
 
-        {/* Aktive Projektile (Instanced für die meisten Typen) */}
-        {Object.entries(groupedProjectiles).map(([unitTypeId, projectilesOfType]) => {
-            // Finde Unit-Daten für Fallback / Suspense (wie zuvor)
+        {/* 1. Computer-gerenderte Projektile (Linien) */}
+        {computerProjectilesWithConfig.map(({ projectile, config }) => (
+             <LineProjectileEffect
+                 key={projectile.projectileId}
+                 projectile={projectile}
+                 // Übergebe Konfigurationswerte aus unitData (mit Defaults)
+                 color={config.projectileColor ?? '#FFFF00'} 
+                 linewidth={config.projectileLineWidth ?? 1}
+                 trailLength={config.projectileTrailLength ?? 0.6}
+                 offsetY={config.projectileOffsetY ?? 0.5}
+                 forwardOffset={config.projectileForwardOffset ?? 0.2}
+             />
+        ))}
+        
+        {/* 2. Bild-basierte Projektile (Instanced Sprites) */}
+        {Object.entries(imageProjectilesGrouped).map(([unitTypeId, projectilesOfType]) => {
+             // Fallback/Suspense Logik bleibt ähnlich
              const unitData = placeholderUnits.find(u => u.id === unitTypeId);
-             // TODO: Ggf. Logik hinzufügen, um Projektile ohne Grafik nicht zu rendern.
-            
-             // Key für die Gruppe
              const groupKey = `projectiles-${unitTypeId}`;
 
-            return (
-                <ErrorBoundary
-                    key={`${groupKey}-boundary`}
-                    fallback={
-                        // Einfacher Fallback für die *gesamte Gruppe* dieses Typs
-                        // Wir können hier nicht mehr pro Projektil einen Fallback rendern.
-                        // Zeige eine einzelne rote Kugel als Hinweis?
-                         <mesh position={[0, 0.5, 25]}> {/* Beispielposition Mitte */}
-                            <sphereGeometry args={[0.2, 8, 8]} />
-                            <meshStandardMaterial color="red" />
-                        </mesh>
-                    }
-                >
-                    <Suspense fallback={
-                         // Fallback, während die EINE Textur für diesen Typ lädt
-                         <mesh position={[0, 0.5, 25]}> {/* Beispielposition Mitte */}
-                            <sphereGeometry args={[0.2, 8, 8]} />
-                            <meshStandardMaterial color="yellow" wireframe />
-                        </mesh>
-                    }>
-                        <InstancedProjectileMeshes 
-                            key={groupKey} // React Key für die Komponente
-                            unitTypeId={unitTypeId}
-                            projectiles={projectilesOfType}
-                        />
-                    </Suspense>
-                </ErrorBoundary>
-            );
+             // Rendere nichts, wenn keine Projektile dieses Typs da sind (redundant? InstancedMesh checkt count)
+             if (projectilesOfType.length === 0) {
+                 return null;
+             }
+
+             return (
+                 <ErrorBoundary
+                     key={`${groupKey}-boundary`}
+                     fallback={
+                          <mesh position={[0, 0.5, 25]}> 
+                             <sphereGeometry args={[0.2, 8, 8]} />
+                             <meshStandardMaterial color="red" />
+                         </mesh>
+                     }
+                 >
+                     <Suspense fallback={
+                          <mesh position={[0, 0.5, 25]}> 
+                             <sphereGeometry args={[0.2, 8, 8]} />
+                             <meshStandardMaterial color="yellow" wireframe />
+                         </mesh>
+                     }>
+                         <InstancedProjectileMeshes
+                             key={groupKey}
+                             unitTypeId={unitTypeId}
+                             projectiles={projectilesOfType}
+                         />
+                     </Suspense>
+                 </ErrorBoundary>
+             );
         })}
-        
-        {/* NEU: Aktive Projektile (Linien für Infanterie) */}
-        {infantryProjectiles.map(projectile => (
-            // Keine spezielle Suspense/Boundary nötig für einfache Linien?
-            // Aber Key ist wichtig für React
-            <LineProjectileEffect 
-                key={projectile.projectileId} 
-                projectile={projectile} 
-            />
-        ))}
         
         {/* Aktive Impact-Effekte rendern (bleibt unverändert) */} 
         {activeImpactEffects.map(effect => {
